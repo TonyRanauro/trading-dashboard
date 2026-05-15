@@ -1,0 +1,14 @@
+C:\TradingPlatform\trading-dashboard\
+├── app.py                  # Main Streamlit entry point
+├── requirements.txt        # Deployment dependencies
+├── .streamlit/
+│   └── secrets.toml        # Local secrets (NOT committed to git)
+├── pages/
+│   ├── 1_Screener.py
+│   ├── 2_Ticker_Detail.py
+│   ├── 3_Watchlist.py
+│   └── 4_Market_Overview.py
+└── lib/
+    ├── supabase_client.py  # Cached connection
+    ├── queries.py          # Reusable data fetches
+    └── formatting.py       # Number/color helpers
