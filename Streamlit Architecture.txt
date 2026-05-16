@@ -1,4 +1,4 @@
-C:\TradingPlatform\trading-dashboard\
+\trading-dashboard\
 ├── app.py                  # Main Streamlit entry point
 ├── requirements.txt        # Deployment dependencies
 ├── .streamlit/
