@@ -12,6 +12,30 @@ st.title("🔍 Screener")
 st.caption("Filter S&P 500 stocks by signal events or current indicator state")
 
 # ============================================================
+# HELPERS
+# ============================================================
+def render_selectable_table(df, column_config, table_key, ticker_col="ticker"):
+    """
+    Renders a dataframe with single-row selection. When a row is clicked,
+    stashes the ticker in session state and jumps to Ticker Detail.
+    """
+    event = st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        column_config=column_config,
+        on_select="rerun",
+        selection_mode="single-row",
+        key=table_key,
+    )
+    if event.selection.rows:
+        row_idx = event.selection.rows[0]
+        ticker = df.iloc[row_idx][ticker_col]
+        st.session_state.selected_ticker = ticker
+        st.switch_page("pages/2_Ticker_Detail.py")
+
+
+# ============================================================
 # DATA LOADERS (cached for 5 min)
 # ============================================================
 @st.cache_data(ttl=300)
@@ -53,6 +77,7 @@ def get_signal_types() -> list[str]:
     data = s.table("latest_signals").select("signal_type").execute().data
     return sorted(set(r["signal_type"] for r in data))
 
+
 # ============================================================
 # UI: MODE TOGGLE
 # ============================================================
@@ -76,16 +101,31 @@ if latest_date is None:
     st.stop()
 
 # ============================================================
+# DEEP-LINK FROM MARKET OVERVIEW
+# ============================================================
+# If the user clicked "Filter Screener" from the Market Overview page,
+# st.session_state.preset_sectors will be set. Pop it (one-shot) and
+# use as the default for the sector multiselect.
+sectors_all = sorted(universe["sector"].dropna().unique())
+preset = st.session_state.pop("preset_sectors", None)
+if preset:
+    # Sanitize: only keep sectors that actually exist in the universe
+    default_sectors = [s for s in preset if s in sectors_all]
+    if not default_sectors:
+        default_sectors = sectors_all
+else:
+    default_sectors = sectors_all
+
+# ============================================================
 # SIDEBAR FILTERS (shared across modes)
 # ============================================================
 with st.sidebar:
     st.header("Filters")
 
-    sectors = sorted(universe["sector"].dropna().unique())
     selected_sectors = st.multiselect(
         "Sectors",
-        options=sectors,
-        default=sectors,
+        options=sectors_all,
+        default=default_sectors,
         help="Leave all selected for entire universe",
     )
 
@@ -145,18 +185,12 @@ if mode.startswith("State"):
             (df["rsi_14"].fillna(50).astype(float) <= rsi_max)]
 
     if sma200_options == "Above SMA200":
-        df = df[df["return_252d"].astype(float) > df["return_252d"].astype(float) * 0]  # placeholder
-        # Better: check close vs SMA. We can fetch current_prices, but for now use rs as proxy.
-        # Best: re-derive from latest_indicators by joining with current_prices.
-        # For v1, use a simpler proxy:
-        # pct_from_high being closer to 0 = stronger trend
-        # Or just leave as warning for now — proper fix in v2
         st.info("Note: 'Above SMA200' filter uses RS as proxy in v1. Refined in v2.")
         df = df[df["rs_spy_20d"].astype(float) > 0]
     elif sma200_options == "Below SMA200":
         df = df[df["rs_spy_20d"].astype(float) < 0]
 
-    # Display columns subset
+    # Display columns
     display_cols = [
         "ticker", "sector", "company_name",
         "rsi_14", "macd_hist",
@@ -167,18 +201,19 @@ if mode.startswith("State"):
     display_cols = [c for c in display_cols if c in df.columns]
     df_display = df[display_cols].copy()
 
-    # Format numeric columns as percentages
+    # Convert numeric columns
     pct_cols = ["rs_spy_20d", "rs_sector_20d", "return_5d", "return_20d",
                 "return_60d", "pct_from_high", "pct_from_low"]
     for c in pct_cols:
         if c in df_display.columns:
             df_display[c] = pd.to_numeric(df_display[c], errors="coerce")
 
-    # Sort by RS vs SPY descending by default
+    # Sort by RS vs SPY descending
     if "rs_spy_20d" in df_display.columns:
-        df_display = df_display.sort_values("rs_spy_20d", ascending=False, na_position="last")
+        df_display = df_display.sort_values(
+            "rs_spy_20d", ascending=False, na_position="last")
 
-    # Summary
+    # Summary metrics
     col1, col2, col3 = st.columns(3)
     col1.metric("Matches", f"{len(df_display):,}")
     if "rs_spy_20d" in df_display.columns:
@@ -190,11 +225,10 @@ if mode.startswith("State"):
         col3.metric("Avg RSI",
                     f"{avg_rsi:.1f}" if pd.notna(avg_rsi) else "—")
 
-    # Render table with formatting
-    st.dataframe(
+    # Render table with click-to-jump
+    st.caption("👆 Click any row to jump to Ticker Detail")
+    render_selectable_table(
         df_display,
-        use_container_width=True,
-        hide_index=True,
         column_config={
             "ticker": st.column_config.TextColumn("Ticker", width="small"),
             "sector": st.column_config.TextColumn("Sector", width="medium"),
@@ -209,6 +243,7 @@ if mode.startswith("State"):
             "pct_from_high": st.column_config.NumberColumn("From 52w High", format="%.2f%%"),
             "pct_from_low": st.column_config.NumberColumn("From 52w Low", format="%.2f%%"),
         },
+        table_key="screener_state_table",
     )
 
 # ============================================================
@@ -227,7 +262,6 @@ else:
         )
     with col2:
         all_signal_types = get_signal_types()
-        # Smart defaults — trend signals selected, momentum unselected
         trend_signals = [s for s in all_signal_types
                          if any(s.startswith(p) for p in
                                 ["golden_cross", "death_cross", "cross_above_sma200",
@@ -264,7 +298,7 @@ else:
         on="ticker", how="left",
     )
 
-    # Filter by sidebar
+    # Sidebar sector filter
     signals_df = signals_df[signals_df["sector"].isin(selected_sectors)]
 
     # Merge with current indicators to enrich
@@ -306,17 +340,17 @@ else:
     bearish = (signals_df["direction"] == "bearish").sum()
     col3.metric("Bull / Bear", f"{bullish} / {bearish}")
 
-    # Render table
+    # Render table with click-to-jump
     display_cols = [
         "signal_date", "ticker", "sector", "signal_type", "direction",
         "strength", "rsi_14", "rs_spy_20d", "rs_sector_20d", "return_20d",
     ]
     display_cols = [c for c in display_cols if c in signals_df.columns]
+    signals_display = signals_df[display_cols].reset_index(drop=True)
 
-    st.dataframe(
-        signals_df[display_cols],
-        use_container_width=True,
-        hide_index=True,
+    st.caption("👆 Click any row to jump to Ticker Detail")
+    render_selectable_table(
+        signals_display,
         column_config={
             "signal_date": st.column_config.DateColumn("Date", width="small"),
             "ticker": st.column_config.TextColumn("Ticker", width="small"),
@@ -329,4 +363,5 @@ else:
             "rs_sector_20d": st.column_config.NumberColumn("RS vs Sector", format="%.2f%%"),
             "return_20d": st.column_config.NumberColumn("Return 20d", format="%.2f%%"),
         },
+        table_key="screener_signal_table",
     )
