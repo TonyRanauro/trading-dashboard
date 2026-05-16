@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<!-- saved from url=(0067)file:///C:/Users/Maxx/Downloads/SP500_Platform_Architecture_v2.html -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<title>S&amp;P 500 Multi-Signal Trading Platform — Architecture</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap');
+
+  :root {
+    --ink: #0d1b2a;
+    --paper: #fafaf7;
+    --line: #d5d0c4;
+    --line-strong: #2a3b4f;
+    --muted: #6b7280;
+    --tech: #2c5f7c;
+    --tech-bg: #e8f0f5;
+    --fund: #6b4a2e;
+    --fund-bg: #f3ebdf;
+    --sent: #5c3a6e;
+    --sent-bg: #ede5f2;
+    --meta: #1e4d3f;
+    --meta-bg: #e2eee8;
+    --exec: #8c2f2f;
+    --exec-bg: #f2e0e0;
+    --infra: #4a5060;
+    --infra-bg: #ebecef;
+    --built: #2a3b4f;
+    --planned: #b5ad9a;
+    --accent: #c75d2c;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Inter', sans-serif;
+    padding: 48px 32px;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(circle at 20% 0%, rgba(199, 93, 44, 0.03) 0%, transparent 50%),
+      radial-gradient(circle at 80% 100%, rgba(44, 95, 124, 0.04) 0%, transparent 50%);
+  }
+
+  .canvas {
+    max-width: 1480px;
+    margin: 0 auto;
+    background: var(--paper);
+  }
+
+  /* Header */
+  .head {
+    border-top: 3px solid var(--ink);
+    border-bottom: 1px solid var(--line);
+    padding: 24px 0 20px;
+    margin-bottom: 32px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    gap: 32px;
+  }
+  .head-left h1 {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 42px;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+  }
+  .head-left h1 .accent {
+    color: var(--accent);
+    font-style: italic;
+  }
+  .head-left .sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  .head-right {
+    text-align: right;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    line-height: 1.6;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .head-right .v {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    gap: 32px;
+    margin-bottom: 36px;
+    padding: 14px 18px;
+    border: 1px solid var(--line);
+    background: white;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    align-items: center;
+  }
+  .legend-item { display: flex; align-items: center; gap: 8px; }
+  .legend-chip {
+    width: 24px; height: 12px; border: 1.5px solid var(--ink);
+  }
+  .legend-chip.built { background: var(--ink); }
+  .legend-chip.planned { background: transparent; border-style: dashed; border-color: var(--planned); }
+  .legend-chip.flow { background: linear-gradient(90deg, var(--ink) 50%, transparent 50%); border: none; height: 2px; }
+
+  /* Sections */
+  .section-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+
+  /* Pipeline rows */
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 14px;
+    margin-bottom: 28px;
+    position: relative;
+  }
+  .pipeline.three { grid-template-columns: repeat(3, 1fr); }
+  .pipeline.four { grid-template-columns: repeat(4, 1fr); }
+
+  .node {
+    background: white;
+    border: 1.5px solid var(--ink);
+    padding: 16px 16px 14px;
+    position: relative;
+    min-height: 140px;
+  }
+  .node.planned {
+    border-style: dashed;
+    border-color: var(--planned);
+    background: rgba(255,255,255,0.5);
+  }
+  .node .num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    color: var(--muted);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+  .node .title {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 18px;
+    line-height: 1.1;
+    margin-bottom: 4px;
+    letter-spacing: -0.01em;
+  }
+  .node .tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 12px;
+  }
+  .node .tag.planned { color: var(--planned); }
+  .node ul {
+    list-style: none;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--ink);
+  }
+  .node ul li {
+    padding-left: 12px;
+    position: relative;
+  }
+  .node ul li::before {
+    content: '—';
+    position: absolute;
+    left: 0;
+    color: var(--muted);
+  }
+  .node.planned ul li, .node.planned .title { color: #757062; }
+
+  /* Domain coloring */
+  .domain-tech { border-color: var(--tech); }
+  .domain-tech .title { color: var(--tech); }
+  .domain-tech .tag { color: var(--tech); }
+
+  .domain-fund { border-color: var(--fund); }
+  .domain-fund .title { color: var(--fund); }
+  .domain-fund .tag { color: var(--fund); }
+
+  .domain-sent { border-color: var(--sent); }
+  .domain-sent .title { color: var(--sent); }
+  .domain-sent .tag { color: var(--sent); }
+
+  .domain-meta { border-color: var(--meta); background: var(--meta-bg); }
+  .domain-meta .title { color: var(--meta); }
+  .domain-meta .tag { color: var(--meta); }
+
+  .domain-exec { border-color: var(--exec); }
+  .domain-exec .title { color: var(--exec); }
+  .domain-exec .tag { color: var(--exec); }
+
+  /* The three-column domain layout */
+  .domains {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 32px;
+  }
+  .domain-col {
+    border: 1.5px solid var(--ink);
+    background: white;
+    padding: 18px;
+    position: relative;
+  }
+  .domain-col.tech { border-color: var(--tech); background: var(--tech-bg); }
+  .domain-col.fund { border-color: var(--fund); border-style: dashed; background: var(--fund-bg); }
+  .domain-col.sent { border-color: var(--sent); border-style: dashed; background: var(--sent-bg); }
+  .domain-col h3 {
+    font-family: 'Fraunces', serif;
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
+  }
+  .domain-col .status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    margin-bottom: 14px;
+    display: inline-block;
+    padding: 3px 8px;
+    border: 1px solid currentColor;
+  }
+  .domain-col.tech .status { color: var(--tech); }
+  .domain-col.fund .status { color: var(--fund); }
+  .domain-col.sent .status { color: var(--sent); }
+  .domain-col .stage {
+    border-top: 1px solid rgba(13, 27, 42, 0.15);
+    padding: 10px 0;
+    font-size: 12px;
+  }
+  .domain-col .stage:first-of-type { border-top: none; }
+  .domain-col .stage .stage-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .domain-col .stage .stage-detail {
+    line-height: 1.45;
+  }
+  .domain-col .stage .stage-detail code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    background: rgba(13, 27, 42, 0.05);
+    padding: 1px 5px;
+    border-radius: 2px;
+  }
+
+  /* Ensemble row */
+  .ensemble-wrap {
+    margin-bottom: 32px;
+    position: relative;
+  }
+  .ensemble {
+    border: 1.5px dashed var(--meta);
+    background: var(--meta-bg);
+    padding: 24px 28px;
+    display: grid;
+    grid-template-columns: 1fr 1.5fr 1fr;
+    gap: 28px;
+    align-items: center;
+  }
+  .ensemble .label {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 600;
+    font-size: 26px;
+    color: var(--meta);
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+  }
+  .ensemble .label .sub {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-style: normal;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--meta);
+    margin-top: 8px;
+    font-weight: 500;
+  }
+  .ensemble .desc {
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--ink);
+  }
+  .ensemble .desc strong { color: var(--meta); }
+  .ensemble .outputs {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    line-height: 1.7;
+    color: var(--meta);
+  }
+  .ensemble .outputs div::before {
+    content: '→ ';
+    color: var(--accent);
+  }
+
+  /* Execution + Risk */
+  .exec-row {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 32px;
+  }
+
+  /* Data & infra footer */
+  .footer-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 20px;
+    margin-bottom: 24px;
+  }
+  .footer-block {
+    background: white;
+    border: 1.5px solid var(--ink);
+    padding: 18px 20px;
+  }
+  .footer-block.infra { background: var(--infra-bg); border-color: var(--infra); }
+  .footer-block h4 {
+    font-family: 'Fraunces', serif;
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    letter-spacing: -0.01em;
+  }
+  .footer-block.infra h4 { color: var(--infra); }
+  .footer-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px 24px;
+    font-size: 12px;
+  }
+  .footer-cols .item {
+    line-height: 1.4;
+  }
+  .footer-cols .item .k {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+
+  /* Sequence footer */
+  .sequence {
+    border-top: 3px solid var(--ink);
+    padding-top: 20px;
+    margin-top: 24px;
+  }
+  .sequence h4 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+  .sequence-track {
+    display: flex;
+    gap: 0;
+    align-items: stretch;
+  }
+  .seq-step {
+    flex: 1;
+    padding: 12px 16px 14px;
+    border-left: 1.5px solid var(--line);
+    position: relative;
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+  .seq-step:first-child { border-left: 1.5px solid var(--ink); }
+  .seq-step .seq-num {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .seq-step .seq-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+    font-size: 13px;
+  }
+  .seq-step .seq-status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-top: 6px;
+    display: inline-block;
+    padding: 2px 6px;
+    border: 1px solid currentColor;
+  }
+  .seq-step.done .seq-status { color: var(--tech); }
+  .seq-step.next .seq-status { color: var(--accent); }
+  .seq-step.future .seq-status { color: var(--planned); }
+  .seq-step.future .seq-title, .seq-step.future .seq-num { color: var(--planned); }
+
+  /* Disclaimer */
+  .disclaimer {
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    text-align: center;
+  }
+
+  /* Connector arrows (visual hint via flex/grid spacing already) */
+  .flow-hint {
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    margin: -16px 0 16px;
+  }
+  .flow-hint::before, .flow-hint::after {
+    content: '';
+    display: inline-block;
+    width: 80px;
+    height: 1px;
+    background: var(--line);
+    vertical-align: middle;
+    margin: 0 12px;
+  }
+
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <header class="head">
+    <div class="head-left">
+      <h1>S&amp;P 500 <span class="accent">Multi-Signal</span><br>Trading Platform</h1>
+      <div class="sub">Architecture &amp; Roadmap · Built · Planned · Vision</div>
+    </div>
+    <div class="head-right">
+      Rev. 2.0<br>
+      <span class="v">Current → Long-Term</span><br>
+      Educational / Research Use
+    </div>
+  </header>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-chip built"></div>Built &amp; running</div>
+    <div class="legend-item"><div class="legend-chip planned"></div>Planned / vision</div>
+    <div class="legend-item"><div class="legend-chip flow"></div>Daily data flow</div>
+    <div style="margin-left:auto;font-size:9px;">Compartmentalized signal domains → ensemble meta-model → execution</div>
+  </div>
+
+  <!-- DATA INGESTION ROW -->
+  <div class="section-label">I. Data Ingestion · External Sources</div>
+  <div class="pipeline three">
+    <div class="node domain-tech">
+      <div class="num">1.1 · BUILT</div>
+      <div class="title">Market Data</div>
+      <div class="tag">yfinance · curl_cffi</div>
+      <ul>
+        <li>Daily OHLCV + adj close</li>
+        <li>S&amp;P 500 universe (Wikipedia)</li>
+        <li>SPY benchmark prices</li>
+        <li>~503 tickers, 20yr history</li>
+      </ul>
+    </div>
+    <div class="node domain-fund planned">
+      <div class="num">1.2 · PLANNED</div>
+      <div class="title">Fundamentals</div>
+      <div class="tag planned">yfinance → EODHD / Sharadar</div>
+      <ul>
+        <li>EPS, revenue, margins</li>
+        <li>P/E, P/B, market cap</li>
+        <li>Earnings calendar + estimates</li>
+        <li>Point-in-time when paid tier</li>
+      </ul>
+    </div>
+    <div class="node domain-sent planned">
+      <div class="num">1.3 · PLANNED</div>
+      <div class="title">News &amp; Sentiment</div>
+      <div class="tag planned">Benzinga / Tiingo / Polygon</div>
+      <ul>
+        <li>Headline + body capture</li>
+        <li>Ticker-tagged, deduped</li>
+        <li>Earnings call transcripts</li>
+        <li>SEC filing alerts (EDGAR)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="flow-hint">Persisted to</div>
+
+  <!-- STORAGE LAYER -->
+  <div class="section-label">II. Storage · SQL Server Developer Edition · DB: Trading</div>
+  <div class="footer-grid" style="grid-template-columns: 1fr 1fr 1fr; gap: 14px;">
+    <div class="footer-block" style="border-color: var(--tech);">
+      <h4 style="color: var(--tech);">Technical Tables</h4>
+      <div class="footer-cols" style="grid-template-columns: 1fr;">
+        <div class="item"><div class="k">Built</div>prices · universe · indicators · signals · analytics_runs · sector_daily*</div>
+        <div class="item"><div class="k">Planned</div>backtest_runs · strategy_signals · regime_state</div>
+      </div>
+    </div>
+    <div class="footer-block" style="border-color: var(--fund); border-style: dashed;">
+      <h4 style="color: var(--fund);">Fundamental Tables</h4>
+      <div class="footer-cols" style="grid-template-columns: 1fr;">
+        <div class="item"><div class="k">Planned</div>fundamentals_snapshot · fundamentals_quarterly · earnings_calendar · analyst_estimates · valuation_ranks</div>
+      </div>
+    </div>
+    <div class="footer-block" style="border-color: var(--sent); border-style: dashed;">
+      <h4 style="color: var(--sent);">Sentiment Tables</h4>
+      <div class="footer-cols" style="grid-template-columns: 1fr;">
+        <div class="item"><div class="k">Planned</div>news_articles · sentiment_scores · ticker_sentiment_daily · social_buzz · event_log</div>
+      </div>
+    </div>
+  </div>
+  <div style="text-align:right; font-family: &#39;JetBrains Mono&#39;, monospace; font-size: 9px; color: var(--muted); margin: -12px 0 24px; letter-spacing: 0.1em; text-transform: uppercase;">* Sector_daily = next addition (Sector RS, in progress)</div>
+
+  <!-- THREE DOMAINS -->
+  <div class="section-label">III. Signal Domains · Compartmentalized Component Models</div>
+  <div class="domains">
+
+    <div class="domain-col tech">
+      <h3>Technical</h3>
+      <span class="status">Component 1 · Built</span>
+      <div class="stage">
+        <div class="stage-name">Indicators</div>
+        <div class="stage-detail">SMA · EMA · VWMA · RSI · MACD · ATR · Bollinger Bands · Returns &amp; Volatility · 52w range · <code>pandas-ta</code></div>
+      </div>
+      <div class="stage">
+        <div class="stage-name">Relative Strength (in progress)</div>
+        <div class="stage-detail">Stock vs SPY · Stock vs sector · Sector vs SPY · Multiple lookbacks (5/20/60/252d)</div>
+      </div>
+      <div class="stage">
+        <div class="stage-name">Signal Generation</div>
+        <div class="stage-detail">10+ signal types: golden/death cross · RSI extremes · MACD crosses · 52w breakouts · SMA200 regime · RS breakouts</div>
+      </div>
+      <div class="stage">
+        <div class="stage-name">→ Technical ML Model</div>
+        <div class="stage-detail">Features: indicator state + RS + signal flags. Target: forward N-day return. <code>xgboost</code> / <code>lightgbm</code></div>
+      </div>
+    </div>
+
+    <div class="domain-col fund">
+      <h3>Fundamental</h3>
+      <span class="status">Component 2 · Vision</span>
+      <div class="stage">
+        <div class="stage-name">Snapshot Metrics</div>
+        <div class="stage-detail">Trailing &amp; forward P/E · P/B · market cap · dividend yield · payout ratios · beta · debt ratios</div>
+      </div>
+      <div class="stage">
+        <div class="stage-name">Quality &amp; Growth</div>
+        <div class="stage-detail">Revenue growth · earnings growth · ROE · ROIC · gross/operating margins · margin trend</div>
+      </div>
+      <div class="stage">
+        <div class="stage-name">Events &amp; Estimates</div>
+        <div class="stage-detail">Earnings calendar · estimate revisions · earnings surprises · pre/post-earnings drift</div>
+      </div>
+      <div class="stage">
+        <div class="stage-name">→ Fundamental ML Model</div>
+        <div class="stage-detail">Features: cross-sectional ranks · growth/quality factors. Target: 1-3 month return.</div>
+      </div>
+    </div>
+
+    <div class="domain-col sent">
+      <h3>Sentiment</h3>
+      <span class="status">Component 3 · Vision</span>
+      <div class="stage">
+        <div class="stage-name">News Scoring</div>
+        <div class="stage-detail">FinBERT (local) on headlines + bodies · Per-article sentiment + confidence · Earnings call analysis</div>
+      </div>
+      <div class="stage">
+        <div class="stage-name">Aggregation</div>
+        <div class="stage-detail">Daily rolled sentiment per ticker · Volume-weighted · Time decay · Surprise vs baseline</div>
+      </div>
+      <div class="stage">
+        <div class="stage-name">Event Detection</div>
+        <div class="stage-detail">M&amp;A · downgrades/upgrades · guidance changes · regulatory actions · 8-K material events</div>
+      </div>
+      <div class="stage">
+        <div class="stage-name">→ Sentiment ML Model</div>
+        <div class="stage-detail">Features: aggregated sentiment · event flags · velocity. Target: short-horizon return (1-5d).</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flow-hint">Combined via</div>
+
+  <!-- ENSEMBLE -->
+  <div class="ensemble-wrap">
+    <div class="section-label">IV. Ensemble Meta-Learner · Cross-Domain Integration</div>
+    <div class="ensemble">
+      <div class="label">
+        Ensemble<br>
+        <em>Meta-Model</em>
+        <span class="sub">Component 4 · Vision</span>
+      </div>
+      <div class="desc">
+        <strong>Combines outputs from technical, fundamental, and sentiment models</strong> into a unified forward-return prediction per ticker. Regime-aware weighting — different domains dominate in different market conditions. Calibrated probability output suitable for portfolio construction.
+        <br><br>
+        Training: walk-forward validation. Feature engineering: per-domain scores + regime features (VIX, sector dispersion, market trend). Frameworks: stacking with <code style="font-family:&#39;JetBrains Mono&#39;,monospace;font-size:10.5px;background:rgba(0,0,0,0.06);padding:1px 4px;">scikit-learn</code> or gradient-boosted meta-learners.
+      </div>
+      <div class="outputs">
+        <div>Ranked candidate list</div>
+        <div>Calibrated probabilities</div>
+        <div>Confidence intervals</div>
+        <div>Regime classification</div>
+        <div>Conviction tiers</div>
+        <div>Component contributions</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FEATURE STORE + BACKTESTING + RISK -->
+  <div class="section-label">V. Supporting Systems · Cross-Cutting Infrastructure</div>
+  <div class="exec-row" style="grid-template-columns: 1fr 1fr 1fr; gap: 14px;">
+    <div class="node planned" style="min-height: 160px;">
+      <div class="num">5.1 · PLANNED</div>
+      <div class="title" style="color: var(--ink);">Feature Store</div>
+      <div class="tag planned">Versioned · time-aligned</div>
+      <ul>
+        <li>Unified <code style="font-family:&#39;JetBrains Mono&#39;,monospace;font-size:10px;background:rgba(0,0,0,0.05);padding:1px 4px;">ml_features</code> table</li>
+        <li>Versioned feature sets</li>
+        <li>Point-in-time correctness</li>
+        <li>Train/serve parity</li>
+      </ul>
+    </div>
+    <div class="node planned" style="min-height: 160px;">
+      <div class="num">5.2 · PLANNED</div>
+      <div class="title" style="color: var(--ink);">Backtesting Engine</div>
+      <div class="tag planned">Walk-forward · cost-aware</div>
+      <ul>
+        <li>vectorbt / backtrader</li>
+        <li>Transaction costs &amp; slippage</li>
+        <li>Survivorship-bias correction</li>
+        <li>Strategy vs benchmark</li>
+      </ul>
+    </div>
+    <div class="node planned" style="min-height: 160px;">
+      <div class="num">5.3 · PLANNED</div>
+      <div class="title" style="color: var(--ink);">Risk Engine</div>
+      <div class="tag planned">Position &amp; portfolio level</div>
+      <ul>
+        <li>Position sizing (Kelly / vol-targeted)</li>
+        <li>Sector / single-name limits</li>
+        <li>Drawdown circuit breakers</li>
+        <li>Pre-trade compliance checks</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- EXECUTION + MONITORING -->
+  <div class="section-label">VI. Execution &amp; Monitoring</div>
+  <div class="exec-row">
+    <div class="node domain-exec planned">
+      <div class="num">6.1 · PLANNED</div>
+      <div class="title">Schwab Execution</div>
+      <div class="tag">OAuth · Paper → Live</div>
+      <ul>
+        <li>Order generation from ensemble output</li>
+        <li>Schwab API client (Python)</li>
+        <li>Paper trading phase first</li>
+        <li>Order status reconciliation</li>
+        <li>Position &amp; cash tracking</li>
+      </ul>
+    </div>
+    <div class="node">
+      <div class="num">6.2 · BUILT</div>
+      <div class="title">Daily Email Report</div>
+      <div class="tag">SQL → Database Mail</div>
+      <ul>
+        <li>Pipeline health</li>
+        <li>Market breadth + sector heatmap</li>
+        <li>Confluence callouts</li>
+        <li>Trend signals + extremes</li>
+        <li>HTML, color-coded</li>
+      </ul>
+    </div>
+    <div class="node planned">
+      <div class="num">6.3 · PLANNED</div>
+      <div class="title">Dashboard</div>
+      <div class="tag planned">Streamlit / PowerBI / Excel</div>
+      <ul>
+        <li>Interactive ticker drilldown</li>
+        <li>Per-component model views</li>
+        <li>Position &amp; P&amp;L tracker</li>
+        <li>Backtest result browser</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- INFRASTRUCTURE -->
+  <div class="footer-grid">
+    <div class="footer-block infra">
+      <h4>Orchestration &amp; Operations · Built</h4>
+      <div class="footer-cols">
+        <div class="item">
+          <div class="k">Scheduler</div>
+          SQL Server Agent · weekdays 6:30 PM · 4-step pipeline · per-step logging
+        </div>
+        <div class="item">
+          <div class="k">Power Management</div>
+          Task Scheduler wake at 6:25 · sleep 6:52 · S3 sleep, hibernation off
+        </div>
+        <div class="item">
+          <div class="k">Compute</div>
+          Windows 11 · Miniconda system-wide · Python 3.13 · C:\TradingPlatform
+        </div>
+        <div class="item">
+          <div class="k">Observability</div>
+          analytics_runs table · Agent history · per-step log files · daily email as heartbeat
+        </div>
+        <div class="item">
+          <div class="k">Security</div>
+          NT Service\SQLSERVERAGENT · least-priv DB roles · Gmail SMTP app password
+        </div>
+        <div class="item">
+          <div class="k">Resilience</div>
+          Auto-start services · idempotent upserts · staging-table pattern · MERGE
+        </div>
+      </div>
+    </div>
+    <div class="footer-block">
+      <h4>Tech Stack</h4>
+      <div class="footer-cols" style="grid-template-columns: 1fr;">
+        <div class="item"><div class="k">Languages</div>Python 3.13 · T-SQL</div>
+        <div class="item"><div class="k">Data libs</div>pandas · numpy · pandas-ta · yfinance</div>
+        <div class="item"><div class="k">ML libs (planned)</div>scikit-learn · xgboost · lightgbm · transformers (FinBERT)</div>
+        <div class="item"><div class="k">DB</div>SQL Server Developer · SQL Agent · Database Mail</div>
+        <div class="item"><div class="k">Viz (planned)</div>Plotly / Streamlit or Power BI</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SEQUENCE -->
+  <div class="sequence">
+    <h4>Roadmap Sequencing</h4>
+    <div class="sequence-track">
+      <div class="seq-step done">
+        <div class="seq-num">01</div>
+        <div class="seq-title">Technical Pipeline</div>
+        Daily prices · indicators · signals · automated email
+        <br><span class="seq-status">Done</span>
+      </div>
+      <div class="seq-step next">
+        <div class="seq-num">02</div>
+        <div class="seq-title">Sector RS</div>
+        Sector aggregates · RS columns · RS-based signals
+        <br><span class="seq-status">In Progress</span>
+      </div>
+      <div class="seq-step future">
+        <div class="seq-num">03</div>
+        <div class="seq-title">Dashboard</div>
+        Interactive UI · drilldowns · monitoring views
+        <br><span class="seq-status">Next</span>
+      </div>
+      <div class="seq-step future">
+        <div class="seq-num">04</div>
+        <div class="seq-title">Fundamentals</div>
+        Snapshot tables · earnings calendar · valuation ranks
+        <br><span class="seq-status">Planned</span>
+      </div>
+      <div class="seq-step future">
+        <div class="seq-num">05</div>
+        <div class="seq-title">Sentiment + FinBERT</div>
+        News ingestion · local NLP · daily sentiment
+        <br><span class="seq-status">Planned</span>
+      </div>
+      <div class="seq-step future">
+        <div class="seq-num">06</div>
+        <div class="seq-title">Component Models</div>
+        Train ML per domain · walk-forward validation
+        <br><span class="seq-status">Planned</span>
+      </div>
+      <div class="seq-step future">
+        <div class="seq-num">07</div>
+        <div class="seq-title">Ensemble + Schwab</div>
+        Meta-learner · paper → live execution · risk engine
+        <br><span class="seq-status">Vision</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="disclaimer">
+    Educational &amp; research purposes only · Not investment advice · Past performance is not indicative of future results
+  </div>
+
+</div>
+
+
+</body></html>
