@@ -69,4 +69,7 @@ Use the sidebar to browse:
 - **Ticker Detail** — Deep dive on a single ticker
 - **Watchlist** — Personal watchlist with current signals
 - **Market Overview** — Sector heatmap and breadth
+- **About and Glossary** — Metric Glossary and Architecture (with roadmap and vision)
+
+ALR 2026
 """)

@@ -30,8 +30,8 @@ with tab_pages:
             "page": "🏠 Home",
             "summary": "Platform health and freshness check",
             "details": (
-                "Shows the latest pipeline run status across all six daily steps "
-                "(prices, indicators, sector RS, signals, email, Supabase push). "
+                "Shows the latest pipeline run status across all daily steps "
+                "(prices, indicators, sector RS, signals, email, Supabase push, earnings calendar). "
                 "Quick way to confirm overnight data has refreshed before using the rest of the app."
             ),
             "best_for": "Morning sanity check; verifying the pipeline ran cleanly.",
@@ -42,7 +42,8 @@ with tab_pages:
             "details": (
                 "Two modes:\n\n"
                 "**State-driven**: filter all 504 tickers by their current indicator state — "
-                "RS thresholds, RSI bands, sector, trend position. Ranks results by RS vs SPY by default.\n\n"
+                "RS thresholds, RSI bands, sector, trend position, and fundamental filters. "
+                "Ranks results by RS vs SPY by default.\n\n"
                 "**Signal-driven**: show recent signal events (last 1-60 days) filtered by signal type, "
                 "enriched with current indicator values. Useful for asking 'what fired recently that I should investigate?'\n\n"
                 "Click any row to jump to Ticker Detail."
@@ -55,8 +56,11 @@ with tab_pages:
             "details": (
                 "Candlestick chart with toggleable indicator overlays (SMAs, EMAs, Bollinger Bands). "
                 "Volume, RSI, and MACD panels share the same time axis. Signal events appear as colored "
-                "triangles on the price chart. Adjustable lookback (1M to 1Y). Recent signal history table "
-                "and full current indicator values in an expandable section."
+                "triangles on the price chart. Adjustable lookback (1M to 1Y).\n\n"
+                "**Fundamentals panel** below the chart shows 27 metrics across valuation, "
+                "profitability, growth, liquidity, cash position, and size. **Earnings calendar** "
+                "shows upcoming and reported earnings dates with EPS estimates and actuals.\n\n"
+                "Recent signal history table and full current indicator values in an expandable section."
             ),
             "best_for": "Investigating a specific name; understanding why it's showing up in screens.",
         },
@@ -101,10 +105,9 @@ with tab_glossary:
     st.subheader("Metric definitions")
     st.caption("Definitions for every metric used in screening, signals, and analysis")
 
-    # Domain filter — useful as more domains come online
     domain_filter = st.radio(
         "Domain",
-        options=["Technical (current)", "Fundamental (coming soon)",
+        options=["Technical (current)", "Fundamental (current)",
                  "Sentiment (planned)", "Macro (planned)"],
         horizontal=True,
         label_visibility="collapsed",
@@ -116,7 +119,6 @@ with tab_glossary:
         st.markdown("### Technical metrics")
         st.caption("Derived from price and volume data. All currently computed daily.")
 
-        # Group by category
         st.markdown("#### Trend & Moving Averages")
 
         with st.expander("**SMA (Simple Moving Average) — 5, 10, 20, 50, 100, 200 day**"):
@@ -452,14 +454,551 @@ with tab_glossary:
             """)
 
     elif domain_filter.startswith("Fundamental"):
-        st.info("**Coming in Phase F1.** Fundamental metrics will be added in this section as the "
-                "ingestion pipeline is built. Expected variables across four categories:")
-        st.markdown("""
-        - **Valuation**: P/E (trailing, forward), P/B, P/S, EV/EBITDA, dividend yield, PEG
-        - **Profitability & Efficiency**: ROE, ROA, ROIC, gross/operating/net margins
-        - **Growth & Momentum**: revenue growth, earnings growth, EPS surprises, estimate revisions
-        - **Liquidity & Solvency**: current ratio, debt/equity, interest coverage, free cash flow
-        """)
+        st.markdown("### Fundamental metrics")
+        st.caption("Pulled from yfinance weekly. Earnings calendar refreshed daily.")
+
+        st.markdown("#### Valuation")
+
+        with st.expander("**P/E Trailing (pe_trailing)**"):
+            st.markdown("""
+            **Definition**: Price-to-earnings ratio using trailing 12-month EPS.
+
+            **Formula**: `pe_trailing = current_price / trailing_12m_EPS`
+
+            **Range**: Typically 5 to 50; high-growth names can exceed 100. Negative means losing money.
+
+            **Interpretation**:
+            - **< 10** → cheap by historical standards (often value or distressed)
+            - **10-20** → typical for mature, stable companies
+            - **20-30** → growth-priced or premium quality
+            - **> 30** → high growth expectations baked in
+            - Negative → company is unprofitable; metric is meaningless
+
+            **Limitations**: Backward-looking. Doesn't capture growth, doesn't work for unprofitable companies,
+            distorted by one-time items. Always compare to sector peers, not absolutes.
+
+            **Example**: AAPL ~30, KO ~22, NVDA ~50, JPM ~12.
+
+            **Related**: P/E Forward (uses estimates), PEG (P/E adjusted for growth), EV/EBITDA.
+            """)
+
+        with st.expander("**P/E Forward (pe_forward)**"):
+            st.markdown("""
+            **Definition**: Price-to-earnings using analyst estimates for next year's EPS.
+
+            **Formula**: `pe_forward = current_price / forward_12m_EPS_estimate`
+
+            **Range**: Same as trailing P/E, but usually lower since EPS is expected to grow.
+
+            **Interpretation**: More forward-looking than trailing P/E. Useful for growing companies
+            where past earnings understate future earning power. Comparing P/E forward vs trailing
+            tells you the implied EPS growth (`(trailing/forward - 1) × 100`).
+
+            **Limitations**: Depends on analyst estimates, which can be biased or wrong. Less reliable
+            for less-followed companies.
+
+            **Related**: P/E Trailing, earnings_growth_yoy.
+            """)
+
+        with st.expander("**P/B (pb) — Price to Book**"):
+            st.markdown("""
+            **Definition**: Stock price divided by book value per share.
+
+            **Formula**: `pb = current_price / bvps`
+
+            **Range**: 0.5 (deep value) to 20+ (premium). Most stocks 1.0 to 5.0.
+
+            **Interpretation**:
+            - **< 1.0** → trading below book value (potential value, or impaired assets)
+            - **1.0-3.0** → typical range for industrials, financials, value
+            - **> 5.0** → growth, intangible-heavy, or asset-light businesses
+            - Less meaningful for tech/services (most value is intangible)
+
+            **When useful**: Especially for banks, insurers, industrials, REITs — businesses where
+            tangible book value is meaningful.
+
+            **Related**: BVPS (the denominator), P/E.
+            """)
+
+        with st.expander("**BVPS (bvps) — Book Value Per Share**"):
+            st.markdown("""
+            **Definition**: Shareholder equity divided by shares outstanding.
+
+            **Formula**: `bvps = total_shareholder_equity / shares_outstanding`
+
+            **Range**: Same units as price; usually a small fraction of current price for non-financial stocks.
+
+            **Interpretation**: Accounting estimate of per-share net worth. Most useful when tracked over time
+            — growing BVPS indicates the company is compounding shareholder equity. Buffett's preferred
+            quality metric.
+
+            **Limitations**: Doesn't capture intangibles (brand, IP, network effects). MSFT BVPS of ~$30
+            while trading at $400 means the value is almost entirely in intangibles.
+
+            **Example**: JPM BVPS ~$109; MSFT BVPS ~$30; AAPL BVPS ~$5.
+
+            **Related**: P/B (price relative to BVPS), tangible book value (BVPS minus goodwill).
+            """)
+
+        with st.expander("**EV/EBITDA (ev_ebitda)**"):
+            st.markdown("""
+            **Definition**: Enterprise value divided by earnings before interest, taxes, depreciation, amortization.
+
+            **Formula**: `ev_ebitda = (market_cap + debt - cash) / EBITDA`
+
+            **Range**: 5 to 25 typical; 30+ is rich.
+
+            **Interpretation**: Cleaner than P/E for cross-company comparisons because it strips out
+            capital structure (debt vs equity) and accounting differences. Especially useful for
+            cyclicals (industrials, energy) and acquisition analysis.
+
+            **Why use over P/E**: Two companies with identical operations but different debt loads have
+            different P/Es but similar EV/EBITDA.
+
+            **Related**: EBITDA Margin, debt_to_equity.
+            """)
+
+        with st.expander("**P/S (ps_ratio) — Price to Sales**"):
+            st.markdown("""
+            **Definition**: Market cap divided by trailing 12-month revenue.
+
+            **Formula**: `ps_ratio = market_cap / revenue_TTM`
+
+            **Range**: 0.5 (value) to 30+ (high-growth tech). Most stocks 1.0 to 10.0.
+
+            **Interpretation**: Useful when P/E is meaningless (unprofitable companies).
+            High P/S only justified by high gross margin or high growth.
+
+            **When most useful**: SaaS, early-stage tech, biotech, anywhere earnings are negative or volatile.
+
+            **Related**: Revenue growth (justifies high P/S), gross margin.
+            """)
+
+        with st.expander("**Dividend Yield (dividend_yield)**"):
+            st.markdown("""
+            **Definition**: Annual dividend per share divided by current price.
+
+            **Formula**: `dividend_yield = annual_dividend / current_price`
+
+            **Range**: 0 (no dividend) to ~8% (high-yield REITs, MLPs).
+
+            **Interpretation**:
+            - **0-1%** → tech / growth (reinvesting cash)
+            - **1-3%** → typical S&P 500 stock
+            - **3-5%** → dividend-focused (REITs, utilities, financials)
+            - **> 5%** → yield-trap risk; verify dividend is covered by earnings
+
+            **Trap warning**: High yields sometimes indicate the market expects the dividend to be cut.
+            Cross-reference with payout ratio (dividend / EPS) — should be under 80% for sustainability.
+
+            **Related**: dividend payout ratio, free cashflow yield.
+            """)
+
+        st.markdown("#### Profitability & Efficiency")
+
+        with st.expander("**Gross Margin (gross_margin)**"):
+            st.markdown("""
+            **Definition**: Gross profit as a percentage of revenue.
+
+            **Formula**: `gross_margin = (revenue - cost_of_goods_sold) / revenue`
+
+            **Range**: 0% to 90%+. Industry-dependent.
+
+            **Interpretation**:
+            - **< 30%** → low margin (retailers, distributors, commodities)
+            - **30-50%** → typical industrial / consumer products
+            - **50-80%** → software, services, branded consumer
+            - **> 80%** → very strong pricing power (luxury, top-tier software)
+
+            **Why it matters**: Indicates pricing power. Companies with rising gross margins are
+            either gaining pricing power or scaling efficiently.
+
+            **Example**: KO ~60%, COST ~12%, MSFT ~70%, NVDA ~75%.
+
+            **Related**: Operating margin (after operating costs), net margin (after everything).
+            """)
+
+        with st.expander("**Operating Margin (operating_margin)**"):
+            st.markdown("""
+            **Definition**: Operating income as a percentage of revenue.
+
+            **Formula**: `operating_margin = operating_income / revenue`
+
+            **Range**: -20% (losses) to 50%+ (best-in-class).
+
+            **Interpretation**: How efficient the core business is *before* taxes and interest. Better
+            apples-to-apples than net margin because not distorted by capital structure or one-time items.
+
+            **Example**: AAPL ~30%, NVDA ~55%, COST ~3%.
+
+            **Related**: Gross margin (upstream), net margin (downstream), EBITDA margin.
+            """)
+
+        with st.expander("**Net Margin (net_margin)**"):
+            st.markdown("""
+            **Definition**: Net income as a percentage of revenue.
+
+            **Formula**: `net_margin = net_income / revenue`
+
+            **Range**: Negative to 40%+.
+
+            **Interpretation**: Bottom-line profitability. Affected by everything — operations, interest,
+            taxes, one-time items. Lower than operating margin almost always.
+
+            **When deceiving**: One-time gains/losses, tax law changes, accounting choices can swing
+            net margin without reflecting the underlying business.
+
+            **Related**: Operating margin (less distorted), EPS, ROE.
+            """)
+
+        with st.expander("**EBITDA Margin (ebitda_margin)**"):
+            st.markdown("""
+            **Definition**: EBITDA (earnings before interest, taxes, depreciation, amortization) as % of revenue.
+
+            **Formula**: `ebitda_margin = EBITDA / revenue`
+
+            **Range**: -10% to 60%+.
+
+            **Interpretation**: Operating cash-generation efficiency, ignoring capital structure and
+            non-cash depreciation. Particularly useful for capital-intensive industries (telecom, energy)
+            where depreciation distorts traditional margins.
+
+            **Critique**: "EBITDA is not cash flow" — Warren Buffett. Doesn't account for capex which is
+            often material. Use alongside FCF metrics, not as a substitute.
+
+            **Related**: Operating margin, free cashflow yield, EV/EBITDA.
+            """)
+
+        with st.expander("**ROE (Return on Equity)**"):
+            st.markdown("""
+            **Definition**: Net income divided by shareholders' equity.
+
+            **Formula**: `roe = net_income / shareholders_equity`
+
+            **Range**: Negative to 50%+.
+
+            **Interpretation**:
+            - **< 5%** → weak; capital not earning much
+            - **10-15%** → average S&P 500
+            - **15-25%** → strong; quality compounder
+            - **> 25%** → exceptional or driven by leverage (verify with ROIC/ROA)
+
+            **Trap**: High ROE can be from high leverage, not high quality. Compare with ROA.
+
+            **Example**: AAPL ~150% (huge buybacks), MSFT ~35%, JPM ~15%.
+
+            **Related**: ROA, ROIC (cleaner), debt_to_equity.
+            """)
+
+        with st.expander("**ROA (Return on Assets)**"):
+            st.markdown("""
+            **Definition**: Net income divided by total assets.
+
+            **Formula**: `roa = net_income / total_assets`
+
+            **Range**: 0 to 25%+.
+
+            **Interpretation**: Capital efficiency regardless of how assets are financed. Cleaner than
+            ROE because not inflated by leverage.
+
+            **Sector caveat**: Banks and financials have low ROA (1-2%) by nature (huge balance sheets).
+            Tech and consumer often have high ROA (15-30%).
+
+            **Related**: ROE (similar but leverage-distorted), ROIC.
+            """)
+
+        st.markdown("#### Growth & Momentum")
+
+        with st.expander("**Revenue Growth YoY (revenue_growth_yoy)**"):
+            st.markdown("""
+            **Definition**: Year-over-year change in revenue.
+
+            **Formula**: `revenue_growth_yoy = (revenue_TTM / revenue_previous_TTM) - 1`
+
+            **Range**: -50% to +100%+. Most mature companies 0-15%.
+
+            **Interpretation**:
+            - **< 0%** → declining business
+            - **0-5%** → mature / mostly flat
+            - **5-15%** → healthy growth
+            - **15-30%** → strong growth
+            - **> 30%** → hypergrowth (often unsustainable long-term)
+
+            **Most important growth signal**: Revenue is harder to fake than earnings. Companies with
+            10+ years of consistent revenue growth are the rare quality compounders.
+
+            **Related**: Earnings growth, gross profit growth.
+            """)
+
+        with st.expander("**Earnings Growth YoY (earnings_growth_yoy)**"):
+            st.markdown("""
+            **Definition**: Year-over-year change in net income.
+
+            **Formula**: `earnings_growth_yoy = (earnings_TTM / earnings_previous_TTM) - 1`
+
+            **Range**: Wider than revenue (more volatile). Can swing wildly on margin changes.
+
+            **Interpretation**: Powerful if sustained; treacherous if one-time. Distinguish "growing
+            because more revenue" from "growing because margins expanded" from "growing because
+            buybacks shrank share count."
+
+            **Trap**: A company growing earnings 30% while revenue grew 3% is doing margin expansion
+            (can't continue forever) or buybacks. Verify with revenue trend.
+
+            **Related**: Revenue growth, EPS, earnings_quarterly_growth.
+            """)
+
+        with st.expander("**Earnings Quarterly Growth (earnings_quarterly_growth)**"):
+            st.markdown("""
+            **Definition**: Most recent quarter's YoY earnings growth.
+
+            **Formula**: `earnings_quarterly_growth = (this_quarter_EPS / same_quarter_last_year_EPS) - 1`
+
+            **Range**: Most volatile of the growth metrics.
+
+            **Interpretation**: Faster signal than annual growth. Often used by momentum-style
+            investors to spot earnings acceleration. Three consecutive quarters of accelerating
+            growth historically a strong signal.
+
+            **Related**: Earnings growth YoY (smoother), EPS surprise (similar concept).
+            """)
+
+        with st.expander("**EPS Trailing / Forward (eps_trailing, eps_forward)**"):
+            st.markdown("""
+            **Definition**: Earnings per share, trailing 12 months or projected forward.
+
+            **Formula**:
+            - `eps_trailing = net_income_TTM / shares_outstanding`
+            - `eps_forward = consensus_estimate_next_12m_EPS`
+
+            **Range**: Negative (losses) to $50+ per share.
+
+            **Interpretation**: Direct EPS values. Useful for computing implied growth rates
+            (`(eps_forward / eps_trailing) - 1`).
+
+            **Related**: P/E ratios use these as denominators; earnings_growth_yoy compares them.
+            """)
+
+        st.markdown("#### Liquidity & Solvency")
+
+        with st.expander("**Current Ratio (current_ratio)**"):
+            st.markdown("""
+            **Definition**: Current assets divided by current liabilities.
+
+            **Formula**: `current_ratio = current_assets / current_liabilities`
+
+            **Range**: 0.5 to 5.0+; healthy is 1.5-3.0.
+
+            **Interpretation**:
+            - **< 1.0** → liquidity concerns (more short-term debt than short-term assets)
+            - **1.0-1.5** → tight but workable
+            - **1.5-3.0** → healthy
+            - **> 5.0** → cash-rich, possibly under-utilizing capital
+
+            **Sector context**: Retail (turn inventory fast) can run lower. Tech often runs much higher.
+
+            **Related**: Quick ratio (stricter), debt_to_equity.
+            """)
+
+        with st.expander("**Quick Ratio (quick_ratio)**"):
+            st.markdown("""
+            **Definition**: Current ratio excluding inventory.
+
+            **Formula**: `quick_ratio = (current_assets - inventory) / current_liabilities`
+
+            **Range**: 0.3 to 4.0+; healthy is 1.0+.
+
+            **Interpretation**: Stricter version of current ratio. Tests whether liabilities can be paid
+            without selling inventory. Useful for retailers or manufacturers where inventory might be
+            illiquid.
+
+            **Related**: Current ratio.
+            """)
+
+        with st.expander("**Debt to Equity (debt_to_equity)**"):
+            st.markdown("""
+            **Definition**: Total debt divided by shareholders' equity.
+
+            **Formula**: `debt_to_equity = total_debt / shareholders_equity`
+
+            **Range**: 0 (no debt) to 300%+ (leveraged). yfinance returns as percentage (50 = 50%).
+
+            **Interpretation**:
+            - **< 50%** → conservative; lots of equity cushion
+            - **50-100%** → moderate leverage
+            - **100-200%** → meaningfully levered
+            - **> 200%** → highly levered; risk of distress in downturns
+
+            **Sector context**: Utilities and REITs naturally high (~200%+). Tech and consumer typically low.
+
+            **Related**: Interest coverage, current ratio, ROE (inflated by leverage).
+            """)
+
+        with st.expander("**Free Cashflow Yield (free_cashflow_yield)**"):
+            st.markdown("""
+            **Definition**: Free cash flow divided by market cap.
+
+            **Formula**: `fcf_yield = free_cashflow / market_cap`
+
+            **Range**: Negative (cash-burning) to 15%+ (deep value with high cash gen).
+
+            **Interpretation**: Like a dividend yield, but uses actual cash generated by the business
+            instead of just what's paid out. Higher FCF yield = more cash returns possible (via dividends
+            or buybacks) per dollar invested.
+
+            - **< 0%** → company is burning cash
+            - **0-3%** → low; either high growth (reinvesting) or weak cash gen
+            - **3-7%** → typical mature business
+            - **> 7%** → strong cash generator, often value territory
+
+            **Why important**: FCF is harder to manipulate than reported earnings. Buffett-style quality check.
+
+            **Related**: Dividend yield, EBITDA margin.
+            """)
+
+        st.markdown("#### Cash & Balance Sheet")
+
+        with st.expander("**Total Cash (total_cash)**"):
+            st.markdown("""
+            **Definition**: Cash and cash equivalents on the balance sheet (most recent quarter).
+
+            **Range**: Millions to hundreds of billions.
+
+            **Interpretation**: Absolute cash position. Use for big-picture optionality — companies
+            with huge cash piles can absorb shocks, make acquisitions, or return capital.
+
+            **Example**: AAPL has $50-200B in cash historically. Microsoft similar. Most companies
+            far less.
+
+            **Related**: cash_per_share (normalized), net_cash (cash minus debt), enterprise value.
+            """)
+
+        with st.expander("**Cash Per Share (cash_per_share)**"):
+            st.markdown("""
+            **Definition**: Total cash divided by shares outstanding.
+
+            **Formula**: `cash_per_share = total_cash / shares_outstanding`
+
+            **Range**: Pennies to $50+.
+
+            **Interpretation**: Cash position normalized to per-share basis. When a company's
+            cash_per_share approaches its stock price, that's a strong value signal — buyers are
+            paying near-zero for the operating business.
+
+            **Example**: AAPL ~$3/share. ETFs and recently-IPO'd companies vary wildly.
+
+            **Related**: BVPS, free_cashflow_yield.
+            """)
+
+        st.markdown("#### Size & Identity")
+
+        with st.expander("**Market Cap (market_cap)**"):
+            st.markdown("""
+            **Definition**: Total dollar value of outstanding shares.
+
+            **Formula**: `market_cap = current_price × shares_outstanding`
+
+            **Range**: $1B (small cap) to $3T+ (mega cap).
+
+            **Interpretation**: Standard buckets:
+            - **Mega cap**: > $200B (AAPL, MSFT, NVDA, etc.)
+            - **Large cap**: $10B - $200B (most S&P 500)
+            - **Mid cap**: $2B - $10B
+            - **Small cap**: $300M - $2B (not in S&P 500)
+            - **Micro cap**: < $300M
+
+            **Why it matters**: Size affects volatility, analyst coverage, institutional ownership,
+            and statistical behavior (larger stocks have smaller average daily moves).
+
+            **Related**: shares_outstanding, P/E, P/B.
+            """)
+
+        with st.expander("**Shares Outstanding (shares_outstanding)**"):
+            st.markdown("""
+            **Definition**: Total number of common shares currently issued and held by investors.
+
+            **Range**: Millions to billions.
+
+            **Interpretation**: Tracking dilution. A company issuing lots of new shares dilutes existing
+            holders. A company buying back shares (reducing outstanding) concentrates ownership and
+            boosts EPS.
+
+            **Watch for**: Year-over-year changes. Stock-based compensation in tech can quietly dilute
+            shareholders even with buybacks.
+
+            **Related**: Market cap (uses this in calculation), buyback rate.
+            """)
+
+        with st.expander("**Beta (beta)**"):
+            st.markdown("""
+            **Definition**: Sensitivity of stock returns to market returns.
+
+            **Formula**: `beta = covariance(stock_returns, market_returns) / variance(market_returns)`
+
+            **Range**: -1 (rare, inverse) to 3+ (high-beta tech, biotech).
+
+            **Interpretation**:
+            - **β = 1** → moves with the market
+            - **β > 1** → more volatile than market (cyclicals, tech, growth)
+            - **β < 1** → less volatile than market (utilities, staples, healthcare)
+            - **β < 0** → moves opposite to market (rare; some gold miners, inverse ETFs)
+
+            **Use**: Portfolio construction, expected return models (CAPM), position sizing.
+
+            **Example**: KO ~0.6, NVDA ~1.7, MSFT ~1.0.
+
+            **Related**: Volatility (vol_20, vol_60), market correlation.
+            """)
+
+        st.divider()
+
+        st.markdown("### Earnings Calendar")
+        st.caption("Refreshed daily; tracks both upcoming and recently-reported earnings events.")
+
+        with st.expander("**earnings_date**"):
+            st.markdown("""
+            **Definition**: Scheduled or actual date of earnings announcement.
+
+            **Interpretation**: Date when the company reports quarterly results. Stocks often move
+            significantly on/around earnings dates ("earnings drift" — positive surprises tend to
+            be followed by continued outperformance, and vice versa).
+
+            **Used in**: Risk management (avoid initiating positions just before earnings), signal
+            filtering (technical signals often less reliable in days near earnings).
+            """)
+
+        with st.expander("**eps_estimate, eps_actual, eps_surprise, eps_surprise_pct**"):
+            st.markdown("""
+            **Definitions**:
+            - `eps_estimate`: consensus analyst forecast (before report)
+            - `eps_actual`: reported EPS (after report)
+            - `eps_surprise = eps_actual - eps_estimate`
+            - `eps_surprise_pct = eps_surprise / abs(eps_estimate)`
+
+            **Interpretation**:
+            - **Positive surprise** → company beat estimates; bullish
+            - **Negative surprise** → missed estimates; bearish
+            - **Magnitude matters**: a beat of 1% can be a yawn; a beat of 20% is a major event
+
+            **Earnings drift research**: Stocks that beat estimates by large margins tend to continue
+            outperforming for 1-3 months afterward, even at the higher post-beat price. Strategies that
+            buy post-positive-surprise have historically generated alpha.
+
+            **Related**: Earnings growth, revenue_estimate, revenue_actual.
+            """)
+
+        with st.expander("**revenue_estimate, revenue_actual**"):
+            st.markdown("""
+            **Definitions**: Consensus and reported quarterly revenue.
+
+            **Range**: Millions to tens of billions per quarter.
+
+            **Interpretation**: Top-line beats vs. misses matter even more than EPS for growth stories.
+            "Beat on EPS, missed on revenue" often gets penalized harder than the opposite — markets
+            interpret it as margin gains over growth, which is harder to sustain.
+
+            **Related**: eps_surprise, revenue_growth_yoy.
+            """)
 
     elif domain_filter.startswith("Sentiment"):
         st.info("**Planned future component.** Metrics will include FinBERT-derived sentiment scores "
@@ -483,8 +1022,7 @@ with tab_arch:
     st.subheader("Platform architecture")
     st.caption("Current state of the platform with built vs. planned components")
 
-    # Locate the embedded HTML file
-    here = Path(__file__).parent.parent  # parent of pages/ → root of dashboard
+    here = Path(__file__).parent.parent
     arch_html_path = here / "assets" / "architecture.html"
 
     if not arch_html_path.exists():
@@ -493,7 +1031,6 @@ with tab_arch:
             "Save the architecture document to `assets/architecture.html` to embed it here."
         )
     else:
-        # Read and embed
         html_content = arch_html_path.read_text(encoding="utf-8")
         components.html(html_content, height=2400, scrolling=True)
 
