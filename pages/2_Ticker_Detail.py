@@ -1,5 +1,5 @@
 """
-Ticker Detail — price chart with indicator overlays + signal timeline.
+Ticker Detail — price chart with indicator overlays + signal timeline + fundamentals.
 """
 
 from datetime import date, timedelta
@@ -33,7 +33,6 @@ def load_prices(ticker: str) -> pd.DataFrame:
     df = pd.DataFrame(data)
     if not df.empty:
         df["price_date"] = pd.to_datetime(df["price_date"])
-        # Coerce numeric columns
         for col in ["open", "high", "low", "close", "adj_close", "volume"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -50,7 +49,6 @@ def load_indicators(ticker: str) -> pd.DataFrame:
     df = pd.DataFrame(data)
     if not df.empty:
         df["indicator_date"] = pd.to_datetime(df["indicator_date"])
-        # All other columns to numeric
         for col in df.columns:
             if col not in ("ticker", "indicator_date"):
                 df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -70,13 +68,84 @@ def load_signals(ticker: str) -> pd.DataFrame:
         df["strength"] = pd.to_numeric(df["strength"], errors="coerce")
     return df
 
+@st.cache_data(ttl=300)
+def load_fundamentals(ticker: str) -> dict | None:
+    s = get_client()
+    data = (s.table("fundamentals_snapshot")
+              .select("*")
+              .eq("ticker", ticker)
+              .order("snapshot_date", desc=True)
+              .limit(1)
+              .execute().data)
+    if not data:
+        return None
+    return data[0]
+
+@st.cache_data(ttl=300)
+def load_earnings(ticker: str) -> pd.DataFrame:
+    s = get_client()
+    data = (s.table("earnings_calendar")
+              .select("*")
+              .eq("ticker", ticker)
+              .order("earnings_date", desc=False)
+              .execute().data)
+    df = pd.DataFrame(data)
+    if not df.empty:
+        df["earnings_date"] = pd.to_datetime(df["earnings_date"])
+    return df
+
+# ============================================================
+# FORMATTING HELPERS
+# ============================================================
+def fmt_pct(v, decimals=2):
+    """Format a decimal value as percentage. 0.123 -> '+12.30%'"""
+    if v is None or pd.isna(v):
+        return "—"
+    try:
+        return f"{float(v) * 100:+.{decimals}f}%"
+    except (ValueError, TypeError):
+        return "—"
+
+def fmt_num(v, decimals=2):
+    """Format a number with thousands separator."""
+    if v is None or pd.isna(v):
+        return "—"
+    try:
+        return f"{float(v):,.{decimals}f}"
+    except (ValueError, TypeError):
+        return "—"
+
+def fmt_money(v):
+    """Format a large number as $X.XB / $X.XM / $X,XXX."""
+    if v is None or pd.isna(v):
+        return "—"
+    try:
+        v = float(v)
+        if abs(v) >= 1e12:
+            return f"${v/1e12:.2f}T"
+        if abs(v) >= 1e9:
+            return f"${v/1e9:.2f}B"
+        if abs(v) >= 1e6:
+            return f"${v/1e6:.2f}M"
+        return f"${v:,.0f}"
+    except (ValueError, TypeError):
+        return "—"
+
+def fmt_ratio(v, decimals=2):
+    """Format a ratio. None -> '—'. Avoids '0.00' for None."""
+    if v is None or pd.isna(v):
+        return "—"
+    try:
+        return f"{float(v):.{decimals}f}"
+    except (ValueError, TypeError):
+        return "—"
+
 # ============================================================
 # TICKER SELECTION
 # ============================================================
 universe = load_universe()
 ticker_options = universe["ticker"].tolist()
 
-# Use session_state so other pages can deep-link to a ticker
 if "selected_ticker" not in st.session_state:
     st.session_state.selected_ticker = "AAPL"
 
@@ -97,7 +166,7 @@ with col_date:
     date_range = st.selectbox(
         "Date range",
         options=["1M", "3M", "6M", "1Y"],
-        index=2,  # 6M default
+        index=2,
     )
 
 date_range_days = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}[date_range]
@@ -109,12 +178,13 @@ with st.spinner(f"Loading {selected_ticker}..."):
     prices = load_prices(selected_ticker)
     indicators = load_indicators(selected_ticker)
     signals = load_signals(selected_ticker)
+    fundamentals = load_fundamentals(selected_ticker)
+    earnings = load_earnings(selected_ticker)
 
 if prices.empty:
     st.error(f"No price data for {selected_ticker}")
     st.stop()
 
-# Filter to date range
 cutoff = prices["price_date"].max() - pd.Timedelta(days=date_range_days)
 prices_view = prices[prices["price_date"] >= cutoff].copy()
 
@@ -142,7 +212,14 @@ day_pct = (day_change / prev["close"]) * 100 if prev["close"] else 0
 
 latest_ind = indicators.iloc[-1] if not indicators.empty else None
 
-m1, m2, m3, m4, m5 = st.columns(5)
+# Next earnings (if any upcoming)
+next_earnings_row = None
+if not earnings.empty:
+    upcoming = earnings[earnings["status"] == "upcoming"]
+    if not upcoming.empty:
+        next_earnings_row = upcoming.iloc[0]
+
+m1, m2, m3, m4, m5, m6 = st.columns(6)
 m1.metric(
     "Close",
     f"${latest['close']:,.2f}",
@@ -158,16 +235,32 @@ if latest_ind is not None:
         "RS vs SPY (20d)",
         f"{rs_spy*100:+.2f}%" if pd.notna(rs_spy) else "—",
     )
-    rs_sector = latest_ind.get("rs_sector_20d")
-    m4.metric(
-        "RS vs Sector (20d)",
-        f"{rs_sector*100:+.2f}%" if pd.notna(rs_sector) else "—",
-    )
     pct_high = latest_ind.get("pct_from_high")
-    m5.metric(
+    m4.metric(
         "From 52w High",
         f"{pct_high*100:+.2f}%" if pd.notna(pct_high) else "—",
     )
+
+# Fundamentals quick-look in header
+if fundamentals is not None:
+    m5.metric(
+        "P/E (TTM)",
+        fmt_ratio(fundamentals.get("pe_trailing"), 1),
+    )
+    m6.metric(
+        "Market Cap",
+        fmt_money(fundamentals.get("market_cap")),
+    )
+
+if next_earnings_row is not None:
+    days_to = (next_earnings_row["earnings_date"].date() - date.today()).days
+    if days_to >= 0:
+        st.info(
+            f"📅 Next earnings: **{next_earnings_row['earnings_date'].strftime('%Y-%m-%d')}** "
+            f"({days_to} days) · "
+            f"EPS estimate: {fmt_ratio(next_earnings_row.get('eps_estimate'), 2)} · "
+            f"Revenue estimate: {fmt_money(next_earnings_row.get('revenue_estimate'))}"
+        )
 
 # ============================================================
 # INDICATOR TOGGLES
@@ -186,7 +279,6 @@ show_signals = st.checkbox("Show signal markers on chart", value=True)
 # ============================================================
 # CHART — 4 stacked panels with shared x-axis
 # ============================================================
-# Merge price + indicator for the view window
 chart_df = prices_view.merge(
     indicators_view,
     left_on="price_date",
@@ -202,7 +294,7 @@ fig = make_subplots(
     subplot_titles=("Price", "Volume", "RSI (14)", "MACD"),
 )
 
-# --- Panel 1: Candlestick + overlays ---
+# Panel 1: Candlestick + overlays
 fig.add_trace(
     go.Candlestick(
         x=chart_df["price_date"],
@@ -212,11 +304,11 @@ fig.add_trace(
         close=chart_df["close"],
         name="Price",
         showlegend=False,
-        increasing_line_color="#10b981",     # bright green
-        decreasing_line_color="#ef4444",     # bright red
+        increasing_line_color="#10b981",
+        decreasing_line_color="#ef4444",
         increasing_fillcolor="#10b981",
         decreasing_fillcolor="#ef4444",
-),
+    ),
     row=1, col=1,
 )
 
@@ -231,11 +323,8 @@ for show, col, label, color in overlays:
     if show and col in chart_df.columns:
         fig.add_trace(
             go.Scatter(
-                x=chart_df["price_date"],
-                y=chart_df[col],
-                name=label,
-                line=dict(color=color, width=1.5),
-                opacity=0.85,
+                x=chart_df["price_date"], y=chart_df[col],
+                name=label, line=dict(color=color, width=1.5), opacity=0.85,
             ),
             row=1, col=1,
         )
@@ -255,10 +344,9 @@ if show_bbands and "bb_upper_20" in chart_df.columns:
             showlegend=False,
         ), row=1, col=1)
 
-# --- Signal markers on price chart ---
+# Signal markers on price chart
 if show_signals and not signals_view.empty:
     for _, sig in signals_view.iterrows():
-        # Find price on that date
         price_row = chart_df[chart_df["price_date"] == sig["signal_date"]]
         if price_row.empty:
             continue
@@ -267,45 +355,34 @@ if show_signals and not signals_view.empty:
         symbol = "triangle-up" if sig["direction"] == "bullish" else "triangle-down"
         fig.add_trace(
             go.Scatter(
-                x=[sig["signal_date"]],
-                y=[y_pos],
+                x=[sig["signal_date"]], y=[y_pos],
                 mode="markers",
                 marker=dict(size=10, color=color, symbol=symbol,
                             line=dict(width=1, color="white")),
-                name=sig["signal_type"],
-                showlegend=False,
+                name=sig["signal_type"], showlegend=False,
                 hovertext=f"{sig['signal_type']}<br>{sig['direction']}<br>strength: {sig['strength']:.4f}",
                 hoverinfo="text",
             ),
             row=1, col=1,
         )
 
-# --- Panel 2: Volume ---
+# Panel 2: Volume
 volume_colors = [
     "#10b981" if c >= o else "#ef4444"
     for c, o in zip(chart_df["close"], chart_df["open"])
 ]
 fig.add_trace(
-    go.Bar(
-        x=chart_df["price_date"],
-        y=chart_df["volume"],
-        marker_color=volume_colors,
-        name="Volume",
-        showlegend=False,
-    ),
+    go.Bar(x=chart_df["price_date"], y=chart_df["volume"],
+           marker_color=volume_colors, name="Volume", showlegend=False),
     row=2, col=1,
 )
 
-# --- Panel 3: RSI ---
+# Panel 3: RSI
 if "rsi_14" in chart_df.columns:
     fig.add_trace(
-        go.Scatter(
-            x=chart_df["price_date"],
-            y=chart_df["rsi_14"],
-            name="RSI",
-            line=dict(color="#8b5cf6", width=1.5),
-            showlegend=False,
-        ),
+        go.Scatter(x=chart_df["price_date"], y=chart_df["rsi_14"],
+                   name="RSI", line=dict(color="#8b5cf6", width=1.5),
+                   showlegend=False),
         row=3, col=1,
     )
     fig.add_hline(y=70, line_dash="dash", line_color="#ef4444",
@@ -314,26 +391,18 @@ if "rsi_14" in chart_df.columns:
                   line_width=1, opacity=0.5, row=3, col=1)
     fig.update_yaxes(range=[0, 100], row=3, col=1)
 
-# --- Panel 4: MACD ---
+# Panel 4: MACD
 if "macd" in chart_df.columns:
     fig.add_trace(
-        go.Scatter(
-            x=chart_df["price_date"],
-            y=chart_df["macd"],
-            name="MACD",
-            line=dict(color="#2563eb", width=1.5),
-            showlegend=False,
-        ),
+        go.Scatter(x=chart_df["price_date"], y=chart_df["macd"],
+                   name="MACD", line=dict(color="#2563eb", width=1.5),
+                   showlegend=False),
         row=4, col=1,
     )
     fig.add_trace(
-        go.Scatter(
-            x=chart_df["price_date"],
-            y=chart_df["macd_signal"],
-            name="Signal",
-            line=dict(color="#f59e0b", width=1.5),
-            showlegend=False,
-        ),
+        go.Scatter(x=chart_df["price_date"], y=chart_df["macd_signal"],
+                   name="Signal", line=dict(color="#f59e0b", width=1.5),
+                   showlegend=False),
         row=4, col=1,
     )
     if "macd_hist" in chart_df.columns:
@@ -342,48 +411,33 @@ if "macd" in chart_df.columns:
             for v in chart_df["macd_hist"].fillna(0)
         ]
         fig.add_trace(
-            go.Bar(
-                x=chart_df["price_date"],
-                y=chart_df["macd_hist"],
-                marker_color=hist_colors,
-                name="Histogram",
-                showlegend=False,
-                opacity=0.5,
-            ),
+            go.Bar(x=chart_df["price_date"], y=chart_df["macd_hist"],
+                   marker_color=hist_colors, name="Histogram",
+                   showlegend=False, opacity=0.5),
             row=4, col=1,
         )
 
-# --- Layout ---
-# Use Plotly's built-in template that adapts well to both light and dark mode.
-# "plotly_white" works in both since Streamlit Cloud handles the background;
-# we just need to make sure axis text and gridlines are visible.
 fig.update_layout(
     height=820,
     showlegend=False,
     xaxis_rangeslider_visible=False,
     margin=dict(l=40, r=40, t=40, b=40),
-    template="plotly",  # Theme-neutral template
-    plot_bgcolor="rgba(0,0,0,0)",   # Transparent — inherits Streamlit's bg
-    paper_bgcolor="rgba(0,0,0,0)",  # Transparent — inherits Streamlit's bg
-    font=dict(color="#9ca3af"),     # Medium-grey text, readable in both modes
+    template="plotly",
+    plot_bgcolor="rgba(0,0,0,0)",
+    paper_bgcolor="rgba(0,0,0,0)",
+    font=dict(color="#9ca3af"),
 )
-
-# Axes: use medium-grey for ticks/labels so they're visible against either bg
 fig.update_xaxes(
     rangebreaks=[dict(bounds=["sat", "mon"])],
-    showgrid=True,
-    gridcolor="rgba(128,128,128,0.2)",  # Subtle grid, visible in both modes
+    showgrid=True, gridcolor="rgba(128,128,128,0.2)",
     tickfont=dict(color="#9ca3af", size=11),
     linecolor="#6b7280",
 )
 fig.update_yaxes(
-    showgrid=True,
-    gridcolor="rgba(128,128,128,0.2)",
+    showgrid=True, gridcolor="rgba(128,128,128,0.2)",
     tickfont=dict(color="#9ca3af", size=11),
     linecolor="#6b7280",
 )
-
-# Subplot titles ("Price", "Volume", "RSI (14)", "MACD") need explicit color too
 for annotation in fig['layout']['annotations']:
     annotation['font'] = dict(color="#9ca3af", size=13)
 
@@ -413,13 +467,113 @@ else:
     )
 
 # ============================================================
+# FUNDAMENTALS PANEL (NEW)
+# ============================================================
+st.divider()
+st.subheader("Fundamentals")
+
+if fundamentals is None:
+    st.info(f"No fundamental data available for {selected_ticker}. ETFs (SPY) "
+            "and recently-added names may not have fundamentals.")
+else:
+    snapshot_date = fundamentals.get("snapshot_date", "—")
+    st.caption(f"Snapshot date: **{snapshot_date}**")
+
+    # ---- Valuation ----
+    st.markdown("##### Valuation")
+    v1, v2, v3, v4 = st.columns(4)
+    v1.metric("P/E (TTM)", fmt_ratio(fundamentals.get("pe_trailing"), 1))
+    v2.metric("P/E (Forward)", fmt_ratio(fundamentals.get("pe_forward"), 1))
+    v3.metric("P/B", fmt_ratio(fundamentals.get("pb"), 2))
+    v4.metric("BVPS", f"${fmt_ratio(fundamentals.get('bvps'), 2)}"
+              if fundamentals.get("bvps") is not None else "—")
+
+    v5, v6, v7, v8 = st.columns(4)
+    v5.metric("EV/EBITDA", fmt_ratio(fundamentals.get("ev_ebitda"), 1))
+    v6.metric("P/S", fmt_ratio(fundamentals.get("ps_ratio"), 2))
+    v7.metric("Dividend Yield", fmt_pct(fundamentals.get("dividend_yield"), 2))
+    v8.metric("Market Cap", fmt_money(fundamentals.get("market_cap")))
+
+    # ---- Profitability & Efficiency ----
+    st.markdown("##### Profitability & Efficiency")
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("Gross Margin", fmt_pct(fundamentals.get("gross_margin"), 2))
+    p2.metric("Operating Margin", fmt_pct(fundamentals.get("operating_margin"), 2))
+    p3.metric("Net Margin", fmt_pct(fundamentals.get("net_margin"), 2))
+    p4.metric("EBITDA Margin", fmt_pct(fundamentals.get("ebitda_margin"), 2))
+
+    p5, p6 = st.columns(2)
+    p5.metric("ROE", fmt_pct(fundamentals.get("roe"), 2))
+    p6.metric("ROA", fmt_pct(fundamentals.get("roa"), 2))
+
+    # ---- Growth & Momentum ----
+    st.markdown("##### Growth & Momentum")
+    g1, g2, g3 = st.columns(3)
+    g1.metric("Revenue Growth (YoY)", fmt_pct(fundamentals.get("revenue_growth_yoy"), 2))
+    g2.metric("Earnings Growth (YoY)", fmt_pct(fundamentals.get("earnings_growth_yoy"), 2))
+    g3.metric("Earnings Growth (Q)", fmt_pct(fundamentals.get("earnings_quarterly_growth"), 2))
+
+    g4, g5 = st.columns(2)
+    g4.metric("EPS (TTM)", fmt_ratio(fundamentals.get("eps_trailing"), 2))
+    g5.metric("EPS (Forward)", fmt_ratio(fundamentals.get("eps_forward"), 2))
+
+    # ---- Liquidity & Solvency ----
+    st.markdown("##### Liquidity & Solvency")
+    l1, l2, l3, l4 = st.columns(4)
+    l1.metric("Current Ratio", fmt_ratio(fundamentals.get("current_ratio"), 2))
+    l2.metric("Quick Ratio", fmt_ratio(fundamentals.get("quick_ratio"), 2))
+    l3.metric("Debt / Equity", fmt_ratio(fundamentals.get("debt_to_equity"), 2))
+    l4.metric("FCF Yield", fmt_pct(fundamentals.get("free_cashflow_yield"), 2))
+
+    # ---- Cash & Balance Sheet ----
+    st.markdown("##### Cash & Balance Sheet")
+    c1, c2 = st.columns(2)
+    c1.metric("Total Cash", fmt_money(fundamentals.get("total_cash")))
+    c2.metric("Cash per Share",
+              f"${fmt_ratio(fundamentals.get('cash_per_share'), 2)}"
+              if fundamentals.get("cash_per_share") is not None else "—")
+
+    # ---- Size & Identity ----
+    st.markdown("##### Size & Identity")
+    s1, s2, s3 = st.columns(3)
+    s1.metric("Shares Outstanding", fmt_money(fundamentals.get("shares_outstanding")))
+    s2.metric("Beta", fmt_ratio(fundamentals.get("beta"), 2))
+    s3.metric("Sector", sector)
+
+# ============================================================
+# EARNINGS HISTORY
+# ============================================================
+if not earnings.empty:
+    st.divider()
+    st.subheader("Earnings calendar")
+
+    earn_display = earnings[["earnings_date", "status", "eps_estimate",
+                              "eps_actual", "eps_surprise_pct",
+                              "revenue_estimate", "revenue_actual"]].copy()
+    earn_display = earn_display.sort_values("earnings_date", ascending=False)
+
+    st.dataframe(
+        earn_display,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "earnings_date": st.column_config.DateColumn("Date"),
+            "status": st.column_config.TextColumn("Status", width="small"),
+            "eps_estimate": st.column_config.NumberColumn("EPS Est", format="%.2f"),
+            "eps_actual": st.column_config.NumberColumn("EPS Act", format="%.2f"),
+            "eps_surprise_pct": st.column_config.NumberColumn("Surprise", format="%.2f%%"),
+            "revenue_estimate": st.column_config.NumberColumn("Rev Est", format="$%d"),
+            "revenue_actual": st.column_config.NumberColumn("Rev Act", format="$%d"),
+        },
+    )
+
+# ============================================================
 # CURRENT INDICATOR VALUES (collapsible)
 # ============================================================
-with st.expander("Current indicator values"):
+with st.expander("Current indicator values (technical)"):
     if latest_ind is None:
         st.info("No indicator data available.")
     else:
-        ind_data = []
         groups = {
             "SMAs": ["sma_5", "sma_10", "sma_20", "sma_50", "sma_100", "sma_200"],
             "EMAs": ["ema_12", "ema_26", "ema_50", "ema_200"],
