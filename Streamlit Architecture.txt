@@ -8,6 +8,7 @@
 │   ├── 2_Ticker_Detail.py
 │   ├── 3_Watchlist.py
 │   └── 4_Market_Overview.py
+│   └── 5_About_and_Glossary.py
 └── lib/
     ├── supabase_client.py  # Cached connection
     ├── queries.py          # Reusable data fetches

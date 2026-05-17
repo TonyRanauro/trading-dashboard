@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- saved from url=(0067)file:///C:/Users/Maxx/Downloads/SP500_Platform_Architecture_v2.html -->
-<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-
-<title>S&amp;P 500 Multi-Signal Trading Platform — Architecture</title>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>S&P 500 Multi-Signal Trading Platform — Architecture</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap');
 
@@ -478,7 +478,7 @@
   <header class="head">
     <div class="head-left">
       <h1>S&amp;P 500 <span class="accent">Multi-Signal</span><br>Trading Platform</h1>
-      <div class="sub">Architecture &amp; Roadmap · Built · Planned · Vision</div>
+      <div class="sub">Architecture &amp; Roadmap · Built &middot; Planned &middot; Vision</div>
     </div>
     <div class="head-right">
       Rev. 2.0<br>
@@ -557,7 +557,7 @@
       </div>
     </div>
   </div>
-  <div style="text-align:right; font-family: &#39;JetBrains Mono&#39;, monospace; font-size: 9px; color: var(--muted); margin: -12px 0 24px; letter-spacing: 0.1em; text-transform: uppercase;">* Sector_daily = next addition (Sector RS, in progress)</div>
+  <div style="text-align:right; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--muted); margin: -12px 0 24px; letter-spacing: 0.1em; text-transform: uppercase;">* Sector_daily = next addition (Sector RS, in progress)</div>
 
   <!-- THREE DOMAINS -->
   <div class="section-label">III. Signal Domains · Compartmentalized Component Models</div>
@@ -641,7 +641,7 @@
       <div class="desc">
         <strong>Combines outputs from technical, fundamental, and sentiment models</strong> into a unified forward-return prediction per ticker. Regime-aware weighting — different domains dominate in different market conditions. Calibrated probability output suitable for portfolio construction.
         <br><br>
-        Training: walk-forward validation. Feature engineering: per-domain scores + regime features (VIX, sector dispersion, market trend). Frameworks: stacking with <code style="font-family:&#39;JetBrains Mono&#39;,monospace;font-size:10.5px;background:rgba(0,0,0,0.06);padding:1px 4px;">scikit-learn</code> or gradient-boosted meta-learners.
+        Training: walk-forward validation. Feature engineering: per-domain scores + regime features (VIX, sector dispersion, market trend). Frameworks: stacking with <code style="font-family:'JetBrains Mono',monospace;font-size:10.5px;background:rgba(0,0,0,0.06);padding:1px 4px;">scikit-learn</code> or gradient-boosted meta-learners.
       </div>
       <div class="outputs">
         <div>Ranked candidate list</div>
@@ -662,7 +662,7 @@
       <div class="title" style="color: var(--ink);">Feature Store</div>
       <div class="tag planned">Versioned · time-aligned</div>
       <ul>
-        <li>Unified <code style="font-family:&#39;JetBrains Mono&#39;,monospace;font-size:10px;background:rgba(0,0,0,0.05);padding:1px 4px;">ml_features</code> table</li>
+        <li>Unified <code style="font-family:'JetBrains Mono',monospace;font-size:10px;background:rgba(0,0,0,0.05);padding:1px 4px;">ml_features</code> table</li>
         <li>Versioned feature sets</li>
         <li>Point-in-time correctness</li>
         <li>Train/serve parity</li>
@@ -829,6 +829,5 @@
   </div>
 
 </div>
-
-
-</body></html>
+</body>
+</html>

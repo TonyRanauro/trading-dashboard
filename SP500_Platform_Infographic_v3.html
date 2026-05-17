@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>S&P 500 Automated Trading Platform — Architecture & Tech Stack v3</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #f8fafc;
+    color: #1e293b;
+    font-family: 'Inter', sans-serif;
+    padding: 24px;
+  }
+
+  .canvas {
+    max-width: 1500px;
+    margin: 0 auto;
+    background: white;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  /* Header */
+  .header {
+    background: #0c1e3a;
+    color: white;
+    padding: 28px 36px;
+    text-align: center;
+  }
+  .header h1 {
+    font-size: 36px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    margin-bottom: 6px;
+  }
+  .header .subtitle {
+    font-size: 16px;
+    opacity: 0.85;
+    font-weight: 400;
+  }
+
+  /* Top pipeline row */
+  .top-pipeline {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr) 0.85fr;
+    gap: 10px;
+    padding: 24px 28px 16px;
+  }
+  .pipe-box {
+    border-radius: 8px;
+    padding: 14px;
+    border: 2px solid;
+    background: white;
+    position: relative;
+  }
+  .pipe-box .pipe-num {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .pipe-box .pipe-title {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: #1e293b;
+  }
+  .pipe-box .pipe-tech {
+    font-size: 11px;
+    color: #64748b;
+    font-style: italic;
+    margin-bottom: 10px;
+    min-height: 14px;
+  }
+  .pipe-box .pipe-detail {
+    font-size: 10.5px;
+    color: #475569;
+    line-height: 1.4;
+  }
+  .pipe-box .pipe-status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+  .pipe-box .status-built { background: #064e3b; color: white; }
+  .pipe-box .status-next { background: #d97706; color: white; }
+  .pipe-box .status-planned { background: #e2e8f0; color: #64748b; }
+
+  /* Color schemes for each pipeline box */
+  .pipe-data { border-color: #3b82f6; }
+  .pipe-data .pipe-num { color: #1e40af; }
+  .pipe-storage { border-color: #10b981; }
+  .pipe-storage .pipe-num { color: #065f46; }
+  .pipe-strategy { border-color: #f59e0b; }
+  .pipe-strategy .pipe-num { color: #92400e; }
+  .pipe-risk { border-color: #a855f7; }
+  .pipe-risk .pipe-num { color: #6b21a8; }
+  .pipe-exec { border-color: #06b6d4; }
+  .pipe-exec .pipe-num { color: #155e75; }
+  .pipe-monitor { border-color: #f97316; }
+  .pipe-monitor .pipe-num { color: #9a3412; }
+
+  .tech-stack {
+    background: #1e293b;
+    border-radius: 8px;
+    padding: 14px 16px;
+    color: white;
+  }
+  .tech-stack h3 {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    text-align: center;
+    color: #cbd5e1;
+  }
+  .tech-stack .tech-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 10px;
+  }
+  .tech-stack .tech-row .tech-icon {
+    width: 16px;
+    text-align: center;
+    font-size: 12px;
+  }
+  .tech-stack .tech-row .tech-name {
+    font-weight: 600;
+  }
+  .tech-stack .tech-row .tech-desc {
+    color: #94a3b8;
+    font-size: 9px;
+  }
+
+  /* Daily workflow label */
+  .workflow-label {
+    text-align: center;
+    padding: 12px 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: #1e40af;
+    letter-spacing: 0.15em;
+    border-top: 2px dashed #cbd5e1;
+    border-bottom: 2px dashed #cbd5e1;
+    margin: 0 28px;
+  }
+
+  /* Main app layer */
+  .app-layer-row {
+    display: grid;
+    grid-template-columns: 0.8fr 3.2fr;
+    gap: 12px;
+    padding: 16px 28px;
+  }
+  .external-services {
+    border: 2px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 14px;
+    background: #f8fafc;
+  }
+  .external-services .es-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #475569;
+    text-align: center;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .es-block {
+    padding: 8px;
+    background: white;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    text-align: center;
+    border: 1px solid #e2e8f0;
+  }
+  .es-block .es-name {
+    font-weight: 700;
+    font-size: 12px;
+    margin-bottom: 2px;
+  }
+  .es-block .es-detail {
+    font-size: 9.5px;
+    color: #64748b;
+  }
+  .es-block .es-status {
+    display: inline-block;
+    font-size: 8px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 8px;
+    margin-top: 4px;
+    text-transform: uppercase;
+  }
+
+  .app-layer {
+    border: 2px solid #1e40af;
+    border-radius: 8px;
+    background: white;
+    padding: 4px;
+  }
+  .app-layer .al-title {
+    background: #1e40af;
+    color: white;
+    padding: 8px 14px;
+    border-radius: 5px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.05em;
+    margin-bottom: 10px;
+  }
+  .app-modules {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
+    padding: 0 8px;
+  }
+  .app-module {
+    border: 1.5px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 10px;
+    background: white;
+  }
+  .app-module .am-title {
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    text-align: center;
+    color: #1e293b;
+  }
+  .app-module .am-icon {
+    text-align: center;
+    font-size: 20px;
+    margin: 4px 0;
+  }
+  .app-module ul {
+    list-style: none;
+    font-size: 9.5px;
+    color: #475569;
+    line-height: 1.4;
+  }
+  .app-module ul li::before {
+    content: '• ';
+    color: #94a3b8;
+  }
+  .app-module .am-status {
+    display: inline-block;
+    font-size: 8px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 8px;
+    text-transform: uppercase;
+    margin-top: 4px;
+  }
+  .status-built { background: #064e3b; color: white; }
+  .status-next { background: #d97706; color: white; }
+  .status-planned { background: #e2e8f0; color: #64748b; }
+
+  .shared-utils {
+    margin: 10px 8px 8px;
+    padding: 10px;
+    background: #f1f5f9;
+    border-radius: 6px;
+    border: 1.5px dashed #94a3b8;
+    text-align: center;
+  }
+  .shared-utils .su-title {
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .shared-utils .su-items {
+    font-size: 10px;
+    color: #475569;
+  }
+
+  /* Data layer */
+  .data-layer {
+    margin: 8px 28px 16px;
+    border: 2px solid #047857;
+    border-radius: 8px;
+    background: white;
+  }
+  .data-layer .dl-title {
+    background: #047857;
+    color: white;
+    padding: 8px 14px;
+    border-radius: 5px 5px 0 0;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.05em;
+  }
+  .data-tables {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 8px;
+    padding: 12px;
+  }
+  .data-table {
+    border: 1.5px solid #d1d5db;
+    border-radius: 6px;
+    padding: 10px;
+    background: #f9fafb;
+    font-size: 10.5px;
+  }
+  .data-table .dt-name {
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 4px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 11px;
+  }
+  .data-table ul {
+    list-style: none;
+    color: #475569;
+    line-height: 1.4;
+  }
+  .data-table ul li {
+    padding: 1px 0;
+    font-size: 10px;
+  }
+  .data-table.built { border-color: #047857; background: #ecfdf5; }
+  .data-table.next { border-color: #d97706; background: #fffbeb; }
+  .data-table.planned { border-color: #cbd5e1; background: #f8fafc; opacity: 0.85; }
+
+  /* Cloud / dashboard band */
+  .cloud-band {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 0 28px 16px;
+  }
+  .cloud-box {
+    border: 2px solid #06b6d4;
+    border-radius: 8px;
+    background: #ecfeff;
+    padding: 14px;
+  }
+  .cloud-box .cb-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #155e75;
+    margin-bottom: 4px;
+  }
+  .cloud-box .cb-subtitle {
+    font-size: 10.5px;
+    color: #475569;
+    margin-bottom: 8px;
+    font-style: italic;
+  }
+  .cloud-box ul {
+    list-style: none;
+    font-size: 10.5px;
+    color: #475569;
+    line-height: 1.5;
+  }
+  .cloud-box ul li::before { content: '✓ '; color: #047857; font-weight: 700; }
+
+  /* Key features & compliance side panel */
+  .right-panel {
+    position: absolute;
+    right: 28px;
+    top: 200px;
+    width: 0;
+  }
+
+  .key-features-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 0 28px 16px;
+  }
+  .kf-box {
+    border-radius: 8px;
+    padding: 14px 16px;
+    border: 1.5px solid;
+  }
+  .kf-key { border-color: #1e40af; background: #eff6ff; }
+  .kf-compliance { border-color: #1e40af; background: #eff6ff; }
+  .kf-box h3 {
+    font-size: 12px;
+    font-weight: 700;
+    color: #1e40af;
+    margin-bottom: 8px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .kf-box ul {
+    list-style: none;
+    font-size: 11px;
+    color: #475569;
+    line-height: 1.7;
+  }
+  .kf-box ul li::before {
+    content: '✓ ';
+    color: #047857;
+    font-weight: 700;
+  }
+
+  /* Future state */
+  .future-state {
+    margin: 0 28px 16px;
+    padding: 16px;
+    border: 2px dashed #a855f7;
+    border-radius: 8px;
+    background: #faf5ff;
+  }
+  .future-state .fs-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #6b21a8;
+    margin-bottom: 4px;
+  }
+  .future-state .fs-subtitle {
+    font-size: 11px;
+    color: #6b21a8;
+    margin-bottom: 12px;
+    font-style: italic;
+  }
+  .future-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+  .future-card {
+    background: white;
+    border: 1px solid #d8b4fe;
+    border-radius: 6px;
+    padding: 10px;
+  }
+  .future-card .fc-title {
+    font-weight: 700;
+    color: #6b21a8;
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+  .future-card .fc-detail {
+    font-size: 10px;
+    color: #475569;
+    line-height: 1.4;
+  }
+
+  /* System infrastructure */
+  .sys-infra {
+    background: #f1f5f9;
+    padding: 16px 28px;
+    border-top: 2px solid #cbd5e1;
+  }
+  .sys-infra .si-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #475569;
+    text-align: center;
+    margin-bottom: 12px;
+  }
+  .si-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 12px;
+  }
+  .si-item {
+    text-align: center;
+  }
+  .si-item .si-icon {
+    font-size: 22px;
+    margin-bottom: 4px;
+  }
+  .si-item .si-name {
+    font-size: 11px;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 2px;
+  }
+  .si-item .si-tech {
+    font-size: 9.5px;
+    color: #64748b;
+    font-style: italic;
+    margin-bottom: 2px;
+  }
+  .si-item .si-detail {
+    font-size: 9.5px;
+    color: #475569;
+    line-height: 1.3;
+  }
+
+  /* Disclaimer */
+  .disclaimer {
+    text-align: center;
+    padding: 12px 28px 20px;
+    font-size: 10px;
+    color: #94a3b8;
+    font-style: italic;
+  }
+
+  /* You-are-here banner */
+  .progress-banner {
+    margin: 0 28px 16px;
+    background: linear-gradient(90deg, #ecfdf5 0%, #ecfdf5 38%, #fef3c7 38%, #fef3c7 45%, #f1f5f9 45%);
+    border-radius: 8px;
+    padding: 12px 18px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    border: 1.5px solid #cbd5e1;
+  }
+  .pb-label {
+    font-weight: 700;
+    color: #1e293b;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .pb-stages {
+    display: flex;
+    flex: 1;
+    gap: 4px;
+    font-size: 10px;
+    align-items: center;
+  }
+  .pb-stage {
+    flex: 1;
+    text-align: center;
+    padding: 4px 6px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: 4px;
+  }
+  .pb-stage.done { background: #047857; color: white; }
+  .pb-stage.next {
+    background: #d97706;
+    color: white;
+    position: relative;
+  }
+  .pb-stage.next::after {
+    content: '◆ YOU ARE HERE';
+    position: absolute;
+    top: -22px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #d97706;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 9px;
+    white-space: nowrap;
+  }
+  .pb-stage.future { background: #e2e8f0; color: #64748b; }
+
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <header class="header">
+    <h1>S&amp;P 500 AUTOMATED TRADING PLATFORM</h1>
+    <div class="subtitle">Python + SQL Server Developer &amp; SQL Agent + Supabase + Streamlit + Charles Schwab API (Daily)</div>
+  </header>
+
+  <!-- Top pipeline row -->
+  <div class="top-pipeline">
+    <div class="pipe-box pipe-data">
+      <div class="pipe-num">1. DATA INGESTION</div>
+      <span class="pipe-status status-built">Built</span>
+      <div class="pipe-title">Yahoo Finance</div>
+      <div class="pipe-tech">yfinance API</div>
+      <div class="pipe-detail">Daily OHLCV, Adjusted Data, S&amp;P 500 universe (504 tickers, 20yr)</div>
+    </div>
+    <div class="pipe-box pipe-storage">
+      <div class="pipe-num">2. DATA STORAGE</div>
+      <span class="pipe-status status-built">Built</span>
+      <div class="pipe-title">SQL Server + Supabase</div>
+      <div class="pipe-tech">Local + Cloud Mirror</div>
+      <div class="pipe-detail">Historical Data, Signals, Indicators, Sector RS, ML Schema</div>
+    </div>
+    <div class="pipe-box pipe-strategy">
+      <div class="pipe-num">3. STRATEGY ENGINE</div>
+      <span class="pipe-status status-built">Built</span>
+      <div class="pipe-title">Python</div>
+      <div class="pipe-tech">pandas-ta + custom</div>
+      <div class="pipe-detail">30+ Indicators, 13 Signal Types, Sector RS, Portfolio Construction (planned)</div>
+    </div>
+    <div class="pipe-box pipe-risk">
+      <div class="pipe-num">4. RISK ENGINE</div>
+      <span class="pipe-status status-planned">Planned</span>
+      <div class="pipe-title">Python</div>
+      <div class="pipe-tech">Future</div>
+      <div class="pipe-detail">Position Sizing, Exposure Limits, Stop Rules, Compliance Checks</div>
+    </div>
+    <div class="pipe-box pipe-exec">
+      <div class="pipe-num">5. EXECUTION</div>
+      <span class="pipe-status status-planned">Planned</span>
+      <div class="pipe-title">Charles Schwab</div>
+      <div class="pipe-tech">Schwab API</div>
+      <div class="pipe-detail">Order Routing, Account Info, Order Status</div>
+    </div>
+    <div class="pipe-box pipe-monitor">
+      <div class="pipe-num">6. MONITORING</div>
+      <span class="pipe-status status-built">Built</span>
+      <div class="pipe-title">Email + Dashboard</div>
+      <div class="pipe-tech">Database Mail + Streamlit</div>
+      <div class="pipe-detail">Daily email reports, mobile-accessible dashboard, alerts</div>
+    </div>
+    <div class="tech-stack">
+      <h3>Tech Stack</h3>
+      <div class="tech-row"><div class="tech-icon">🐍</div><div><div class="tech-name">Python 3.13</div><div class="tech-desc">Core Application</div></div></div>
+      <div class="tech-row"><div class="tech-icon">🗄️</div><div><div class="tech-name">SQL Server</div><div class="tech-desc">Local Database</div></div></div>
+      <div class="tech-row"><div class="tech-icon">☁️</div><div><div class="tech-name">Supabase</div><div class="tech-desc">Cloud Postgres</div></div></div>
+      <div class="tech-row"><div class="tech-icon">📊</div><div><div class="tech-name">Streamlit</div><div class="tech-desc">Dashboard</div></div></div>
+      <div class="tech-row"><div class="tech-icon">📈</div><div><div class="tech-name">Plotly</div><div class="tech-desc">Charts</div></div></div>
+      <div class="tech-row"><div class="tech-icon">📰</div><div><div class="tech-name">yfinance</div><div class="tech-desc">Market Data</div></div></div>
+      <div class="tech-row"><div class="tech-icon">🐼</div><div><div class="tech-name">Pandas</div><div class="tech-desc">Data Analysis</div></div></div>
+      <div class="tech-row"><div class="tech-icon">🪟</div><div><div class="tech-name">Windows 11</div><div class="tech-desc">Deployment OS</div></div></div>
+    </div>
+  </div>
+
+  <!-- Progress banner -->
+  <div class="progress-banner">
+    <div class="pb-label">Progress:</div>
+    <div class="pb-stages">
+      <div class="pb-stage done">Technical Pipeline</div>
+      <div class="pb-stage done">Sector RS</div>
+      <div class="pb-stage done">Cloud + Dashboard</div>
+      <div class="pb-stage next">Fundamentals</div>
+      <div class="pb-stage future">Sentiment</div>
+      <div class="pb-stage future">ML Models</div>
+      <div class="pb-stage future">Execution</div>
+    </div>
+  </div>
+
+  <div class="workflow-label">DAILY WORKFLOW</div>
+
+  <!-- Application Layer -->
+  <div class="app-layer-row">
+    <div class="external-services">
+      <div class="es-title">External Services</div>
+      <div class="es-block">
+        <div class="es-name">Yahoo Finance</div>
+        <div class="es-detail">Market Data</div>
+        <span class="es-status status-built">Connected</span>
+      </div>
+      <div class="es-block">
+        <div class="es-name">yfinance Fundamentals</div>
+        <div class="es-detail">P/E, EPS, Earnings</div>
+        <span class="es-status status-next">Next</span>
+      </div>
+      <div class="es-block">
+        <div class="es-name">News API</div>
+        <div class="es-detail">Headlines + Sentiment</div>
+        <span class="es-status status-planned">Future</span>
+      </div>
+      <div class="es-block">
+        <div class="es-name">Schwab API</div>
+        <div class="es-detail">Orders, Positions</div>
+        <span class="es-status status-planned">Future</span>
+      </div>
+    </div>
+
+    <div class="app-layer">
+      <div class="al-title">APPLICATION LAYER (PYTHON)</div>
+      <div class="app-modules">
+        <div class="app-module">
+          <div class="am-title">Data Ingestion</div>
+          <div class="am-icon">📥</div>
+          <ul>
+            <li>Daily prices</li>
+            <li>S&amp;P 500 universe</li>
+            <li>Data validation</li>
+            <li>Idempotent upsert</li>
+          </ul>
+          <span class="am-status status-built">Built</span>
+        </div>
+        <div class="app-module">
+          <div class="am-title">Indicators &amp; RS</div>
+          <div class="am-icon">📐</div>
+          <ul>
+            <li>30+ indicators</li>
+            <li>Sector RS</li>
+            <li>Cross-sectional</li>
+            <li>pandas-ta</li>
+          </ul>
+          <span class="am-status status-built">Built</span>
+        </div>
+        <div class="app-module">
+          <div class="am-title">Signal Engine</div>
+          <div class="am-icon">📡</div>
+          <ul>
+            <li>13 signal types</li>
+            <li>Trend/momentum/RS</li>
+            <li>~933k historical</li>
+            <li>Daily incremental</li>
+          </ul>
+          <span class="am-status status-built">Built</span>
+        </div>
+        <div class="app-module" style="border-color: #d97706; background: #fffbeb;">
+          <div class="am-title" style="color: #92400e;">Fundamentals</div>
+          <div class="am-icon">💰</div>
+          <ul>
+            <li>P/E, P/B, Market Cap</li>
+            <li>Earnings calendar</li>
+            <li>Growth rates</li>
+            <li>Quality metrics</li>
+          </ul>
+          <span class="am-status status-next">Next</span>
+        </div>
+        <div class="app-module">
+          <div class="am-title">Sentiment</div>
+          <div class="am-icon">📰</div>
+          <ul>
+            <li>News ingestion</li>
+            <li>FinBERT scoring</li>
+            <li>Event detection</li>
+            <li>Daily aggregates</li>
+          </ul>
+          <span class="am-status status-planned">Future</span>
+        </div>
+        <div class="app-module">
+          <div class="am-title">Monitoring</div>
+          <div class="am-icon">📊</div>
+          <ul>
+            <li>HTML email</li>
+            <li>Streamlit dashboard</li>
+            <li>analytics_runs</li>
+            <li>Pipeline health</li>
+          </ul>
+          <span class="am-status status-built">Built</span>
+        </div>
+      </div>
+      <div class="shared-utils">
+        <div class="su-title">Shared Utilities</div>
+        <div class="su-items">Config Manager · Logging · Error Handling · SQL Agent Scheduler · Email/Notifications · Power Mgmt</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Data Layer -->
+  <div class="data-layer">
+    <div class="dl-title">💾 DATA LAYER — SQL Server Developer (Source of Truth) + Supabase (Cloud Mirror)</div>
+    <div class="data-tables">
+      <div class="data-table built">
+        <div class="dt-name">prices</div>
+        <ul>
+          <li>Ticker (PK)</li>
+          <li>Date (PK)</li>
+          <li>OHLCV</li>
+          <li>Adj Close</li>
+          <li>~2.5M rows</li>
+        </ul>
+      </div>
+      <div class="data-table built">
+        <div class="dt-name">universe</div>
+        <ul>
+          <li>Ticker (PK)</li>
+          <li>Company Name</li>
+          <li>Sector</li>
+          <li>In S&amp;P 500 Flag</li>
+          <li>504 tickers</li>
+        </ul>
+      </div>
+      <div class="data-table built">
+        <div class="dt-name">indicators</div>
+        <ul>
+          <li>30+ technicals</li>
+          <li>8 RS columns</li>
+          <li>SMA/EMA/RSI/MACD</li>
+          <li>Returns, Vol, 52w</li>
+        </ul>
+      </div>
+      <div class="data-table built">
+        <div class="dt-name">signals</div>
+        <ul>
+          <li>SignalID (PK)</li>
+          <li>13 types</li>
+          <li>Direction</li>
+          <li>Strength</li>
+          <li>~933k records</li>
+        </ul>
+      </div>
+      <div class="data-table built">
+        <div class="dt-name">sector_daily</div>
+        <ul>
+          <li>Sector aggregates</li>
+          <li>Avg returns</li>
+          <li>Breadth metrics</li>
+          <li>Multi-horizon</li>
+        </ul>
+      </div>
+      <div class="data-table next">
+        <div class="dt-name">fundamentals</div>
+        <ul>
+          <li>P/E, P/B</li>
+          <li>Growth, Margins</li>
+          <li>Market Cap</li>
+          <li>Earnings calendar</li>
+          <li><strong>Next phase</strong></li>
+        </ul>
+      </div>
+      <div class="data-table planned">
+        <div class="dt-name">ml_features</div>
+        <ul>
+          <li>Versioned</li>
+          <li>Point-in-time</li>
+          <li>ml_models</li>
+          <li>ml_predictions</li>
+          <li><em>Schema ready</em></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cloud band -->
+  <div class="cloud-band">
+    <div class="cloud-box">
+      <div class="cb-title">☁️ Supabase Cloud Mirror</div>
+      <div class="cb-subtitle">Nightly push of summary tables (~123k rows)</div>
+      <ul>
+        <li>8 mirrored tables for dashboard reads</li>
+        <li>Row-level security with anon read policies</li>
+        <li>Service-role key local-only · anon key public-safe</li>
+        <li>500MB free tier · 50-100MB used</li>
+      </ul>
+    </div>
+    <div class="cloud-box">
+      <div class="cb-title">📱 Streamlit Dashboard</div>
+      <div class="cb-subtitle">Deployed publicly · mobile-accessible</div>
+      <ul>
+        <li>Screener: state-driven + signal-driven modes</li>
+        <li>Ticker Detail: candlestick + indicators + signals</li>
+        <li>Watchlist: CRUD with click-to-jump</li>
+        <li>Market Overview: sector treemap + breadth</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Future state -->
+  <div class="future-state">
+    <div class="fs-title">🔮 Future State — Multi-Domain Ensemble Architecture</div>
+    <div class="fs-subtitle">Compartmentalized component models per signal domain, combined by a meta-learner</div>
+    <div class="future-grid">
+      <div class="future-card">
+        <div class="fc-title">Technical Component</div>
+        <div class="fc-detail">ML model on existing indicators + RS + signals. Walk-forward CV. Cross-sectional ranking target.</div>
+      </div>
+      <div class="future-card">
+        <div class="fc-title">Fundamental Component</div>
+        <div class="fc-detail">Quality + growth + valuation features. Cross-sectional ranks. 1-3 month horizon.</div>
+      </div>
+      <div class="future-card">
+        <div class="fc-title">Sentiment Component</div>
+        <div class="fc-detail">FinBERT-derived features. News velocity, event flags. Short-horizon (1-5d).</div>
+      </div>
+      <div class="future-card">
+        <div class="fc-title">Ensemble Meta-Model</div>
+        <div class="fc-detail">Combines all three. Regime-aware weighting. Calibrated probabilities for execution.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Key features & compliance -->
+  <div class="key-features-row">
+    <div class="kf-box kf-key">
+      <h3>✓ Key Features (Built)</h3>
+      <ul>
+        <li>S&amp;P 500 + SPY benchmark coverage (504 tickers)</li>
+        <li>Daily automated ingestion &amp; processing</li>
+        <li>13 signal types · 933k historical signals · sector RS</li>
+        <li>Cloud-mirrored Postgres · 4-page dashboard · mobile</li>
+        <li>HTML email with breadth + leaders + confluence</li>
+        <li>Pipeline observability via analytics_runs</li>
+        <li>Wake/sleep automation · idempotent reruns</li>
+      </ul>
+    </div>
+    <div class="kf-box kf-compliance">
+      <h3>🔮 Roadmap (Planned)</h3>
+      <ul>
+        <li>Fundamentals: P/E, growth, earnings calendar (next)</li>
+        <li>News + FinBERT sentiment pipeline</li>
+        <li>Component ML models per signal domain</li>
+        <li>Ensemble meta-learner with regime features</li>
+        <li>Walk-forward backtesting engine (vectorbt)</li>
+        <li>Risk engine: Kelly sizing, drawdown limits</li>
+        <li>Schwab paper → live execution integration</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- System Infrastructure -->
+  <div class="sys-infra">
+    <div class="si-title">⚙ SYSTEM INFRASTRUCTURE</div>
+    <div class="si-grid">
+      <div class="si-item">
+        <div class="si-icon">⏰</div>
+        <div class="si-name">Scheduler</div>
+        <div class="si-tech">SQL Server Agent</div>
+        <div class="si-detail">Weekday 6:30 PM 6-step pipeline</div>
+      </div>
+      <div class="si-item">
+        <div class="si-icon">📝</div>
+        <div class="si-name">Logging</div>
+        <div class="si-tech">analytics_runs + files</div>
+        <div class="si-detail">Per-step status, errors</div>
+      </div>
+      <div class="si-item">
+        <div class="si-icon">🔐</div>
+        <div class="si-name">Config &amp; Secrets</div>
+        <div class="si-tech">System env vars</div>
+        <div class="si-detail">SQL credentials, Supabase keys</div>
+      </div>
+      <div class="si-item">
+        <div class="si-icon">💾</div>
+        <div class="si-name">Backup</div>
+        <div class="si-tech">SQL Server Backup</div>
+        <div class="si-detail">Regular DB backups (planned)</div>
+      </div>
+      <div class="si-item">
+        <div class="si-icon">📧</div>
+        <div class="si-name">Notifications</div>
+        <div class="si-tech">Database Mail</div>
+        <div class="si-detail">Daily HTML report</div>
+      </div>
+      <div class="si-item">
+        <div class="si-icon">📊</div>
+        <div class="si-name">Dashboard</div>
+        <div class="si-tech">Streamlit Cloud</div>
+        <div class="si-detail">Mobile + desktop access</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="disclaimer">
+    This platform is for educational and research purposes only. It is not financial advice. Past performance is not indicative of future results. Trading involves risk.
+  </div>
+
+</div>
+</body>
+</html>
