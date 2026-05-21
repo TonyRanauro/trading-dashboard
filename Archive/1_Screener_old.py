@@ -1,48 +1,16 @@
 """
 Screener — filter the universe by signals or current indicator state,
 plus technical and fundamental criteria.
-
-Data conventions (CRITICAL — bugs come from getting these wrong):
-- rs_spy_20d, rs_sector_20d, return_*, pct_from_high, dividend_yield,
-  roe, net_margin, revenue_growth_yoy, gross_margin, earnings_growth_yoy
-  are all stored as DECIMALS (e.g. 0.1180 = 11.80%).
-- debt_to_equity is stored as PERCENT (e.g. 150 = 150% = 1.5x leverage),
-  per yfinance convention.
-- pe_trailing, pe_forward, pb, beta, market_cap are raw numbers.
-
-Display rule: multiply decimal-stored percent columns by 100 EXACTLY ONCE,
-right before rendering. Metric tiles compute on RAW decimal values, with
-*100 only in the f-string.
 """
 
 from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
-from lib.supabase_client import get_client, get_latest_clean_date
+from lib.supabase_client import get_client
 
 st.set_page_config(page_title="Screener", page_icon="🔍", layout="wide")
 st.title("🔍 Screener")
 st.caption("Filter S&P 500 stocks by signal events, current state, or fundamentals")
-
-# Columns stored as decimals that need *100 for display
-DECIMAL_PCT_COLS = [
-    "rs_spy_20d", "rs_sector_20d",
-    "return_1d", "return_5d", "return_20d", "return_60d",
-    "pct_from_high", "pct_from_low",
-    "dividend_yield", "roe", "net_margin", "gross_margin",
-    "revenue_growth_yoy", "earnings_growth_yoy",
-    "free_cashflow_yield",
-]
-
-# Columns that should be coerced to numeric so nulls render as blank, not "None"
-NUMERIC_COLS = [
-    "pe_trailing", "pe_forward", "pb", "roe", "rsi_14",
-    "dividend_yield", "revenue_growth_yoy", "net_margin",
-    "rs_spy_20d", "rs_sector_20d",
-    "return_5d", "return_20d", "return_60d",
-    "pct_from_high",
-]
-
 
 # ============================================================
 # HELPERS
@@ -65,53 +33,6 @@ def render_selectable_table(df, column_config, table_key, ticker_col="ticker"):
         st.switch_page("pages/2_Ticker_Detail.py")
 
 
-def scale_pct_for_display(df: pd.DataFrame) -> pd.DataFrame:
-    """Multiply decimal-stored percent columns by 100 for rendering.
-    Returns a copy. Call exactly ONCE per display dataframe, just before
-    passing to render_selectable_table.
-    """
-    out = df.copy()
-    for c in DECIMAL_PCT_COLS:
-        if c in out.columns:
-            out[c] = pd.to_numeric(out[c], errors="coerce") * 100
-    return out
-
-
-def coerce_numeric_cols(df: pd.DataFrame) -> pd.DataFrame:
-    """Ensure numeric columns are real floats so nulls render as blank, not "None"."""
-    out = df.copy()
-    for c in NUMERIC_COLS:
-        if c in out.columns:
-            out[c] = pd.to_numeric(out[c], errors="coerce")
-    return out
-
-
-def format_market_cap(v):
-    """Format market cap as $X.XXT / $X.XB / $X.XM / $X for display."""
-    if pd.isna(v):
-        return ""
-    v = float(v)
-    if v >= 1e12:
-        return f"${v / 1e12:.2f}T"
-    if v >= 1e9:
-        return f"${v / 1e9:.1f}B"
-    if v >= 1e6:
-        return f"${v / 1e6:.0f}M"
-    return f"${v:,.0f}"
-
-
-def market_cap_bucket(mc):
-    if mc is None or pd.isna(mc):
-        return "Unknown"
-    if mc >= 2e11:
-        return "Mega ($200B+)"
-    if mc >= 1e10:
-        return "Large ($10B-$200B)"
-    if mc >= 2e9:
-        return "Mid ($2B-$10B)"
-    return "Small (<$2B)"
-
-
 # ============================================================
 # DATA LOADERS
 # ============================================================
@@ -121,7 +42,6 @@ def load_universe() -> pd.DataFrame:
     data = s.table("universe").select("*").execute().data
     return pd.DataFrame(data)
 
-
 @st.cache_data(ttl=300)
 def load_latest_indicators_for_date(target_date: str) -> pd.DataFrame:
     s = get_client()
@@ -129,7 +49,6 @@ def load_latest_indicators_for_date(target_date: str) -> pd.DataFrame:
         "indicator_date", target_date
     ).execute().data
     return pd.DataFrame(data)
-
 
 @st.cache_data(ttl=300)
 def load_signals_in_range(start_date: str, end_date: str) -> pd.DataFrame:
@@ -141,13 +60,20 @@ def load_signals_in_range(start_date: str, end_date: str) -> pd.DataFrame:
               .execute().data)
     return pd.DataFrame(data)
 
+@st.cache_data(ttl=300)
+def get_latest_indicator_date() -> str | None:
+    s = get_client()
+    result = (s.table("latest_indicators")
+                .select("indicator_date")
+                .order("indicator_date", desc=True)
+                .limit(1).execute().data)
+    return result[0]["indicator_date"] if result else None
 
 @st.cache_data(ttl=300)
 def get_signal_types() -> list[str]:
     s = get_client()
     data = s.table("latest_signals").select("signal_type").execute().data
     return sorted(set(r["signal_type"] for r in data))
-
 
 @st.cache_data(ttl=300)
 def load_fundamentals() -> pd.DataFrame:
@@ -157,7 +83,9 @@ def load_fundamentals() -> pd.DataFrame:
     df = pd.DataFrame(data)
     if df.empty:
         return df
-    numeric_cols = [c for c in df.columns if c not in ("ticker", "snapshot_date")]
+    # Coerce numeric columns
+    numeric_cols = [c for c in df.columns
+                    if c not in ("ticker", "snapshot_date")]
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
@@ -179,7 +107,7 @@ st.divider()
 # LOAD BASE DATA
 # ============================================================
 universe = load_universe()
-latest_date = get_latest_clean_date()
+latest_date = get_latest_indicator_date()
 fundamentals = load_fundamentals()
 
 if latest_date is None:
@@ -197,6 +125,18 @@ if preset:
         default_sectors = sectors_all
 else:
     default_sectors = sectors_all
+
+# Market cap buckets — used for filter dropdown and post-filter labeling
+def market_cap_bucket(mc):
+    if mc is None or pd.isna(mc):
+        return "Unknown"
+    if mc >= 2e11:
+        return "Mega ($200B+)"
+    if mc >= 1e10:
+        return "Large ($10B-$200B)"
+    if mc >= 2e9:
+        return "Mid ($2B-$10B)"
+    return "Small (<$2B)"
 
 
 # ============================================================
@@ -219,7 +159,7 @@ with st.sidebar:
         "RS vs SPY (20d)",
         min_value=-1.0, max_value=1.0,
         value=(-1.0, 1.0), step=0.05, format="%.2f",
-        help="Stock return minus SPY return over 20 days (decimal). +0.10 = outperforming by 10%",
+        help="Stock return minus SPY return over 20 days. +0.1 = outperforming by 10%",
     )
     rs_sector_min, rs_sector_max = st.slider(
         "RS vs Sector (20d)",
@@ -242,7 +182,7 @@ with st.sidebar:
 
         # Market cap bucket
         mc_buckets = ["Mega ($200B+)", "Large ($10B-$200B)",
-                      "Mid ($2B-$10B)", "Small (<$2B)", "Unknown"]
+                       "Mid ($2B-$10B)", "Small (<$2B)", "Unknown"]
         selected_mc_buckets = st.multiselect(
             "Market cap",
             options=mc_buckets,
@@ -250,12 +190,10 @@ with st.sidebar:
             help='"Unknown" = ETFs and stocks with missing market cap data',
         )
 
-        # ----- Valuation -----
+    # ----- Valuation -----
         st.markdown("**Valuation**")
-        pe_outliers = st.checkbox(
-            "Tighten P/E to <50 (exclude high)", value=False,
-            help="When unchecked, slider goes 0-1500 and includes all valuations",
-        )
+        pe_outliers = st.checkbox("Tighten P/E to <50 (exclude high)", value=False,
+                                   help="When unchecked, slider goes 0-1500 and includes all valuations")
         pe_max_slider_max = 50.0 if pe_outliers else 1500.0
         pe_range = st.slider(
             "P/E (TTM)",
@@ -270,9 +208,8 @@ with st.sidebar:
             value=(0.0, 500.0), step=1.0, format="%.1f",
             help="Tech names can have P/B 20+. Distressed financials can spike to 100+",
         )
-        pb_include_negative = st.checkbox(
-            "Include negative / null P/B", value=True, key="pb_neg",
-        )
+        pb_include_negative = st.checkbox("Include negative / null P/B", value=True,
+                                           key="pb_neg")
 
         # ----- Dividends -----
         st.markdown("**Dividends**")
@@ -309,15 +246,13 @@ with st.sidebar:
 
         # ----- Leverage -----
         st.markdown("**Leverage**")
-        de_tighten = st.checkbox(
-            "Tighten D/E to <200% (exclude high leverage)", value=False,
-        )
+        de_tighten = st.checkbox("Tighten D/E to <200% (exclude high leverage)", value=False)
         de_max_slider = 200.0 if de_tighten else 5000.0
         de_max = st.slider(
             "Max debt/equity",
             min_value=0.0, max_value=de_max_slider,
             value=de_max_slider, step=50.0, format="%.0f%%",
-            help="yfinance stores D/E as a percent (150 = 1.5x). REITs and some financials exceed 1000%",
+            help="yfinance returns as percentage (50 = 50%). REITs and some financials can exceed 1000%",
         )
         de_include_null = st.checkbox("Include null debt/equity", value=True)
 
@@ -326,33 +261,32 @@ with st.sidebar:
 # FUNDAMENTAL FILTER FUNCTION (shared across modes)
 # ============================================================
 def apply_fundamental_filters(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply sidebar fundamental filters. Operates on RAW (decimal) values.
-    Expects df to have already been merged with fundamentals — if not,
-    returns df unchanged.
+    """Apply sidebar fundamental filters to a dataframe containing fundamental columns.
+
+    Expects df to have already been merged with fundamentals — if not, returns df unchanged.
     """
     if "market_cap" not in df.columns:
-        return df
-
-    df = df.copy()
+        return df  # No fundamentals merged in
 
     # Market cap bucket
+    df = df.copy()
     df["_mc_bucket"] = df["market_cap"].apply(market_cap_bucket)
     df = df[df["_mc_bucket"].isin(selected_mc_buckets)]
     df = df.drop(columns=["_mc_bucket"])
 
-    # P/E — pass nulls, negatives, and values in range
+    # P/E
     pe_min, pe_max = pe_range
     if pe_include_negative:
-        pe_filter = (df["pe_trailing"].isna()) | (df["pe_trailing"] < 0) | (
+        pe_filter = (df["pe_trailing"].isna()) | (
             (df["pe_trailing"] >= pe_min) & (df["pe_trailing"] <= pe_max))
     else:
         pe_filter = (df["pe_trailing"] >= pe_min) & (df["pe_trailing"] <= pe_max)
     df = df[pe_filter]
 
-    # P/B — pass nulls, negatives, and values in range
+    # P/B
     pb_min, pb_max = pb_range
     if pb_include_negative:
-        pb_filter = (df["pb"].isna()) | (df["pb"] < 0) | (
+        pb_filter = (df["pb"].isna()) | (
             (df["pb"] >= pb_min) & (df["pb"] <= pb_max))
     else:
         pb_filter = (df["pb"] >= pb_min) & (df["pb"] <= pb_max)
@@ -414,7 +348,7 @@ if mode.startswith("State"):
         fund_cols = [c for c in fund_cols if c in fundamentals.columns]
         df = df.merge(fundamentals[fund_cols], on="ticker", how="left")
 
-    # Apply technical filters (operate on RAW decimal values)
+    # Apply technical filters
     df = df[df["sector"].isin(selected_sectors)]
     df = df[(df["rs_spy_20d"].fillna(0).astype(float) >= rs_spy_min) &
             (df["rs_spy_20d"].fillna(0).astype(float) <= rs_spy_max)]
@@ -429,7 +363,7 @@ if mode.startswith("State"):
     elif sma200_options == "Below SMA200":
         df = df[df["rs_spy_20d"].astype(float) < 0]
 
-    # Apply fundamental filters (still on RAW values)
+    # Apply fundamental filters
     pre_fund_count = len(df)
     df = apply_fundamental_filters(df)
     post_fund_count = len(df)
@@ -437,23 +371,7 @@ if mode.startswith("State"):
         st.caption(f"Fundamental filters: narrowed from {pre_fund_count} to "
                    f"{post_fund_count} tickers")
 
-    # ----- Summary metrics (computed from RAW decimal values) -----
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Matches", f"{len(df):,}")
-    if "rs_spy_20d" in df.columns:
-        avg_rs = pd.to_numeric(df["rs_spy_20d"], errors="coerce").mean()
-        col2.metric("Avg RS vs SPY",
-                    f"{avg_rs * 100:+.2f}%" if pd.notna(avg_rs) else "—")
-    if "pe_trailing" in df.columns:
-        med_pe = pd.to_numeric(df["pe_trailing"], errors="coerce").median()
-        col3.metric("Median P/E",
-                    f"{med_pe:.1f}" if pd.notna(med_pe) else "—")
-    if "roe" in df.columns:
-        med_roe = pd.to_numeric(df["roe"], errors="coerce").median()
-        col4.metric("Median ROE",
-                    f"{med_roe * 100:.1f}%" if pd.notna(med_roe) else "—")
-
-    # ----- Display table -----
+    # Display columns
     display_cols = [
         "ticker", "sector", "company_name",
         "rsi_14", "rs_spy_20d", "rs_sector_20d",
@@ -463,24 +381,40 @@ if mode.startswith("State"):
         "revenue_growth_yoy", "market_cap",
     ]
     display_cols = [c for c in display_cols if c in df.columns]
-    df_for_display = df[display_cols].copy()
+    df_display = df[display_cols].copy()
 
-    # Ensure numeric columns are real floats so nulls render as blank, not "None"
-    df_for_display = coerce_numeric_cols(df_for_display)
+    # Convert numeric
+# Convert numeric and multiply percent columns by 100 for display
+    pct_cols = ["rs_spy_20d", "rs_sector_20d", "return_5d", "return_20d",
+                "return_60d", "pct_from_high",
+                "dividend_yield", "roe", "revenue_growth_yoy"]
+    for c in pct_cols:
+        if c in df_display.columns:
+            #st.write("DEBUG rs_spy_20d sample:", df_display["rs_spy_20d"].head(5).tolist()) #added debug 5/18/26
+            df_display[c] = pd.to_numeric(df_display[c], errors="coerce") * 100
 
-    # Sort by RS vs SPY (still raw decimals at this point)
-    if "rs_spy_20d" in df_for_display.columns:
-        df_for_display = df_for_display.sort_values(
-            "rs_spy_20d", ascending=False, na_position="last",
-        )
+    # Sort
+    if "rs_spy_20d" in df_display.columns:
+        df_display = df_display.sort_values(
+            "rs_spy_20d", ascending=False, na_position="last")
 
-    # Scale decimal percent columns to display percents — exactly once
-    df_display = scale_pct_for_display(df_for_display)
+    # Summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Matches", f"{len(df_display):,}")
+    if "rs_spy_20d" in df_display.columns:
+        avg_rs = df_display["rs_spy_20d"].mean()
+        col2.metric("Avg RS vs SPY",
+                    f"{avg_rs*100:+.2f}%" if pd.notna(avg_rs) else "—")
+    if "pe_trailing" in df_display.columns:
+        med_pe = df_display["pe_trailing"].median()
+        col3.metric("Median P/E",
+                    f"{med_pe:.1f}" if pd.notna(med_pe) else "—")
+    if "roe" in df_display.columns:
+        med_roe = df_display["roe"].median()
+        col4.metric("Median ROE",
+                    f"{med_roe*100:.1f}%" if pd.notna(med_roe) else "—")
 
-    # Format market cap as $X.XT / $X.XB / $X.XM (do this AFTER scaling)
-    if "market_cap" in df_display.columns:
-        df_display["market_cap"] = df_display["market_cap"].apply(format_market_cap)
-
+    # Render
     st.caption("👆 Click any row to jump to Ticker Detail")
     render_selectable_table(
         df_display,
@@ -500,7 +434,7 @@ if mode.startswith("State"):
             "dividend_yield": st.column_config.NumberColumn("Div Yield", format="%.2f%%"),
             "roe": st.column_config.NumberColumn("ROE", format="%.2f%%"),
             "revenue_growth_yoy": st.column_config.NumberColumn("Rev Growth", format="%.2f%%"),
-            "market_cap": st.column_config.TextColumn("Market Cap", width="small"),
+            "market_cap": st.column_config.NumberColumn("Market Cap", format="$%d"),
         },
         table_key="screener_state_table",
     )
@@ -524,9 +458,8 @@ else:
         all_signal_types = get_signal_types()
         trend_signals = [s for s in all_signal_types
                          if any(s.startswith(p) for p in
-                                ["golden_cross", "death_cross",
-                                 "cross_above_sma200", "cross_below_sma200",
-                                 "rs_breakout", "rs_breakdown",
+                                ["golden_cross", "death_cross", "cross_above_sma200",
+                                 "cross_below_sma200", "rs_breakout", "rs_breakdown",
                                  "sector_leader", "breakout_52w", "breakdown_52w"])]
         selected_signals = st.multiselect(
             "Signal types",
@@ -565,13 +498,13 @@ else:
                        "return_20d", "pct_from_high"]
         enrich_cols = [c for c in enrich_cols if c in indicators_df.columns]
         signals_df = signals_df.merge(
-            indicators_df[enrich_cols], on="ticker", how="left",
+            indicators_df[enrich_cols], on="ticker", how="left"
         )
 
-        # Technical filters (RAW decimal values)
+        # Technical filters
         for col, lo, hi in [("rs_spy_20d", rs_spy_min, rs_spy_max),
-                            ("rs_sector_20d", rs_sector_min, rs_sector_max),
-                            ("rsi_14", rsi_min, rsi_max)]:
+                             ("rs_sector_20d", rs_sector_min, rs_sector_max),
+                             ("rsi_14", rsi_min, rsi_max)]:
             if col in signals_df.columns:
                 vals = pd.to_numeric(signals_df[col], errors="coerce").fillna(
                     50 if col == "rsi_14" else 0)
@@ -596,13 +529,26 @@ else:
         st.caption(f"Fundamental filters: narrowed from {pre_fund_count} to "
                    f"{post_fund_count} signal events")
 
-    # Order by date, then strength
+    # Order
     signals_df["strength_num"] = pd.to_numeric(signals_df["strength"], errors="coerce")
     signals_df = signals_df.sort_values(
-        ["signal_date", "strength_num"], ascending=[False, False],
-    )
+        ["signal_date", "strength_num"], ascending=[False, False])
 
-    # ----- Summary metrics (computed from RAW decimal values) -----
+#temp disgnostic:
+# TEMP DIAGNOSTIC — remove after verifying
+    st.write({
+        "rs_spy_20d_dtype": str(df_display["rs_spy_20d"].dtype),
+        "rs_spy_20d_sample": df_display["rs_spy_20d"].dropna().head(5).tolist(),
+        "rs_spy_20d_mean": float(df_display["rs_spy_20d"].mean()),
+        "roe_dtype": str(df_display["roe"].dtype) if "roe" in df_display.columns else "missing",
+        "roe_sample": df_display["roe"].dropna().head(5).tolist() if "roe" in df_display.columns else [],
+        "roe_median": float(df_display["roe"].median()) if "roe" in df_display.columns else None,
+    })
+
+
+
+
+    # Summary
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Signal events", f"{len(signals_df):,}")
     col2.metric("Unique tickers", f"{signals_df['ticker'].nunique():,}")
@@ -610,28 +556,22 @@ else:
     bearish = (signals_df["direction"] == "bearish").sum()
     col3.metric("Bull / Bear", f"{bullish} / {bearish}")
     if "pe_trailing" in signals_df.columns:
-        med_pe = pd.to_numeric(signals_df["pe_trailing"], errors="coerce").median()
+        med_pe = signals_df["pe_trailing"].median()
         col4.metric("Median P/E",
                     f"{med_pe:.1f}" if pd.notna(med_pe) else "—")
 
-    # ----- Display table -----
+    # Display — multiply percent columns by 100 for display
     display_cols = [
         "signal_date", "ticker", "sector", "signal_type", "direction",
         "strength", "rsi_14", "rs_spy_20d", "return_20d",
         "pe_trailing", "roe", "revenue_growth_yoy", "market_cap",
     ]
     display_cols = [c for c in display_cols if c in signals_df.columns]
-    signals_for_display = signals_df[display_cols].reset_index(drop=True)
-
-    # Ensure numeric columns are real floats so nulls render as blank, not "None"
-    signals_for_display = coerce_numeric_cols(signals_for_display)
-
-    # Scale decimal percent columns to display percents — exactly once
-    signals_display = scale_pct_for_display(signals_for_display)
-
-    # Format market cap as $X.XT / $X.XB / $X.XM (do this AFTER scaling)
-    if "market_cap" in signals_display.columns:
-        signals_display["market_cap"] = signals_display["market_cap"].apply(format_market_cap)
+    signals_display = signals_df[display_cols].reset_index(drop=True)
+    pct_cols_signal = ["rs_spy_20d", "return_20d", "roe", "revenue_growth_yoy"]
+    for c in pct_cols_signal:
+        if c in signals_display.columns:
+            signals_display[c] = pd.to_numeric(signals_display[c], errors="coerce") * 100
 
     st.caption("👆 Click any row to jump to Ticker Detail")
     render_selectable_table(
@@ -649,7 +589,8 @@ else:
             "pe_trailing": st.column_config.NumberColumn("P/E", format="%.1f"),
             "roe": st.column_config.NumberColumn("ROE", format="%.2f%%"),
             "revenue_growth_yoy": st.column_config.NumberColumn("Rev Growth", format="%.2f%%"),
-            "market_cap": st.column_config.TextColumn("Market Cap", width="small"),
+            "market_cap": st.column_config.NumberColumn("Market Cap", format="$%d"),
         },
         table_key="screener_signal_table",
     )
+    
