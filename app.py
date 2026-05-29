@@ -69,6 +69,8 @@ Use the sidebar to browse:
 - **Ticker Detail** — Deep dive on a single ticker
 - **Watchlist** — Personal watchlist with current signals
 - **Market Overview** — Sector heatmap and breadth
+- **AI-ML Performance** — Detailed analysis and performance tracking of AI/ML models' predictions
+- **Sentiment** — Daily extremes via FinBERT net score with click to ticker detail
 - **About and Glossary** — Metric Glossary and Architecture (with roadmap and vision)
 
 ALR 2026

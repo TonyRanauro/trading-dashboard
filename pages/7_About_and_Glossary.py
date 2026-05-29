@@ -107,8 +107,8 @@ with tab_glossary:
 
     domain_filter = st.radio(
         "Domain",
-        options=["Technical (current)", "Fundamental (current)",
-                 "Sentiment (planned)", "Macro (planned)"],
+        options=["Technical", "Fundamental", "AI-ML Performance",
+                 "Sentiment", "Macro (planned)"],
         horizontal=True,
         label_visibility="collapsed",
     )
@@ -1000,8 +1000,13 @@ with tab_glossary:
             **Related**: eps_surprise, revenue_growth_yoy.
             """)
 
+    elif domain_filter.startswith("AI-ML Performance"):
+        st.info("Model prediction tracking, accuracy and diagnostics, "
+                "including decile performance, probability distribution, "
+                "top-decile composition by sector, RankIC over time, calibration plot and confusion matrix.")
+
     elif domain_filter.startswith("Sentiment"):
-        st.info("**Planned future component.** Metrics will include FinBERT-derived sentiment scores "
+        st.info("Metrics include today's extreme-tailed FinBERT-derived sentiment scores "
                 "on news headlines and earnings call transcripts, ticker-level sentiment aggregates, "
                 "news velocity, and event flags (M&A, downgrades/upgrades, guidance changes, 8-K events).")
 
@@ -1012,7 +1017,7 @@ with tab_glossary:
         - **Risk & Volatility**: VIX, VVIX, high-yield spreads, MOVE index
         - **Currency & Commodities**: DXY (dollar index), gold, crude oil, copper
         - **Economic Indicators**: ISM PMI, unemployment claims, inflation expectations
-        - **Regime Classification**: Risk-on vs risk-off, growth vs value rotation
+        - **Regime Classification**: Risk-on vs risk-off, growth vs value rotation (including Hidden Markov Model results)
         """)
 
 # ============================================================
