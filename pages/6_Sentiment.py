@@ -11,6 +11,7 @@ Sections:
   2. Sentiment by sector heatmap
   3. Sentiment leaders & laggards over a date range
   4. Per-ticker sentiment time series
+  4b. Per-ticker article drilldown (raw articles with FinBERT scores + links)
   5. Sentiment vs ML predictions scatter
 
 Data conventions:
@@ -103,6 +104,38 @@ def load_predictions_for_date(target_date: date) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
     df["prediction_date"] = pd.to_datetime(df["prediction_date"]).dt.date
+    return df
+
+
+@st.cache_data(ttl=300)
+def load_news_articles_for_ticker(ticker: str) -> pd.DataFrame:
+    """Load all news_articles rows for a given ticker (last 30 days, the sync window).
+    Pages past 1000-row default."""
+    s = get_client()
+    rows = []
+    offset = 0
+    while True:
+        batch = (s.table("news_articles")
+                  .select("article_id, ticker, title, publisher, link, "
+                          "published_at, published_date, article_type, "
+                          "sentiment_label, net_score, confidence, "
+                          "score_positive, score_negative")
+                  .eq("ticker", ticker)
+                  .order("published_date", desc=True)
+                  .range(offset, offset + 999)
+                  .execute().data)
+        if not batch:
+            break
+        rows.extend(batch)
+        if len(batch) < 1000:
+            break
+        offset += 1000
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    df["published_date"] = pd.to_datetime(df["published_date"]).dt.date
     return df
 
 
@@ -562,22 +595,22 @@ st.divider()
 
 
 # ============================================================
-# SECTION 4: PER-TICKER SENTIMENT TIME SERIES
+# TICKER FOCUS — shared selector for sections 4 and 5
 # ============================================================
-st.subheader("Per-ticker sentiment time series")
+st.subheader("Ticker focus")
 st.caption(
-    "Daily FinBERT score for a single ticker over the available window, "
-    "with a 5-day rolling average. Markers flag extreme days "
-    "(≥ +0.40 = strong positive, ≤ -0.25 = strong negative — matches the "
-    "thresholds used in the daily FinBERT email)."
+    "Pick a ticker to drive the next two sections: its sentiment time series, "
+    "and its underlying articles."
 )
 
-# Pick the default ticker = the one with most articles on the snapshot date
-# (falls back to alphabetical first if snapshot is empty)
+# Build the list of tickers eligible for the focus
 tickers_with_sentiment = sorted(sentiment["ticker"].dropna().unique())
+
 if not tickers_with_sentiment:
     st.info("No tickers with sentiment data available.")
+    selected_ticker = None
 else:
+    # Default: most-discussed ticker on the snapshot date
     if not snapshot.empty:
         default_ticker = (
             snapshot.sort_values("n_articles", ascending=False)
@@ -591,22 +624,38 @@ else:
     except ValueError:
         default_idx = 0
 
-    # Honor session_state["selected_ticker"] if the user got here via click-through
+    # Honor st.session_state["selected_ticker"] (click-throughs from other pages)
     if "selected_ticker" in st.session_state:
         st_pick = st.session_state["selected_ticker"]
         if st_pick in tickers_with_sentiment:
             default_idx = tickers_with_sentiment.index(st_pick)
 
-    sec4_col1, sec4_col2 = st.columns([2, 5])
-
-    with sec4_col1:
+    focus_col1, focus_col2 = st.columns([2, 5])
+    with focus_col1:
         selected_ticker = st.selectbox(
             "Ticker",
             options=tickers_with_sentiment,
             index=default_idx,
-            key="sentiment_ts_ticker",
+            key="sentiment_focus_ticker",
         )
 
+
+st.divider()
+
+
+# ============================================================
+# SECTION 4: PER-TICKER SENTIMENT TIME SERIES
+# ============================================================
+st.subheader(f"Sentiment time series — {selected_ticker}" if selected_ticker else "Sentiment time series")
+st.caption(
+    "Daily FinBERT score over the available window, with a 5-day rolling "
+    "average. Markers flag extreme days (≥ +0.40 = strong positive, "
+    "≤ -0.25 = strong negative — same thresholds as the daily FinBERT email)."
+)
+
+if not selected_ticker:
+    st.info("Select a ticker in the focus section above.")
+else:
     # Pull this ticker's full window (unfiltered — we want the time series
     # regardless of the snapshot-date/sector filters above)
     ts_df = (
@@ -785,12 +834,150 @@ st.divider()
 
 
 # ============================================================
-# SECTION 5: SENTIMENT vs AI-ML PREDICTIONS
+# SECTION 4b: ARTICLE DRILLDOWN
 # ============================================================
-st.subheader("Sentiment vs AI-ML predictions")
+st.subheader(f"Articles — {selected_ticker}" if selected_ticker else "Articles")
+st.caption(
+    "Individual articles for the selected ticker with their FinBERT scores. "
+    "Click 'Open' to view the original article in a new tab. Available "
+    "window: last 30 days."
+)
+
+if not selected_ticker:
+    st.info("Select a ticker in the focus section above.")
+else:
+    articles_df = load_news_articles_for_ticker(selected_ticker)
+
+    if articles_df.empty:
+        st.info(f"No articles found for {selected_ticker} in the last 30 days.")
+    else:
+        # Filter controls for this section
+        a_col1, a_col2, a_col3 = st.columns([3, 2, 2])
+
+        with a_col1:
+            min_articles_date = articles_df["published_date"].min()
+            max_articles_date = articles_df["published_date"].max()
+            default_start = max_articles_date - timedelta(days=14)
+            if default_start < min_articles_date:
+                default_start = min_articles_date
+            a_range = st.date_input(
+                "Article date range",
+                value=(default_start, max_articles_date),
+                min_value=min_articles_date,
+                max_value=max_articles_date,
+                key="articles_date_range",
+            )
+            if isinstance(a_range, tuple) and len(a_range) == 2:
+                a_start, a_end = a_range
+            else:
+                a_start = a_end = (a_range if not isinstance(a_range, tuple)
+                                   else a_range[0])
+
+        with a_col2:
+            label_filter = st.multiselect(
+                "Sentiment label",
+                options=["positive", "neutral", "negative"],
+                default=[],
+                help="Empty = include all labels",
+                key="articles_label_filter",
+            )
+
+        with a_col3:
+            sort_by = st.radio(
+                "Sort by",
+                options=["Date (newest first)", "Score (most positive)",
+                          "Score (most negative)"],
+                index=0,
+                key="articles_sort_by",
+            )
+
+        # Apply filters
+        mask_a = (
+            (articles_df["published_date"] >= a_start)
+            & (articles_df["published_date"] <= a_end)
+        )
+        if label_filter:
+            mask_a &= articles_df["sentiment_label"].isin(label_filter)
+        filtered_articles = articles_df[mask_a].copy()
+
+        # Sort
+        if sort_by == "Date (newest first)":
+            filtered_articles = filtered_articles.sort_values(
+                ["published_date", "net_score"], ascending=[False, False]
+            )
+        elif sort_by == "Score (most positive)":
+            filtered_articles = filtered_articles.sort_values(
+                "net_score", ascending=False
+            )
+        else:
+            filtered_articles = filtered_articles.sort_values(
+                "net_score", ascending=True
+            )
+
+        # Limit display to 100 articles to keep the table snappy
+        n_total = len(filtered_articles)
+        display_df = filtered_articles.head(100).copy()
+
+        st.caption(
+            f"**{n_total}** article{'s' if n_total != 1 else ''} match filters"
+            + (" (showing top 100)" if n_total > 100 else "")
+        )
+
+        if display_df.empty:
+            st.info("No articles match the current filters.")
+        else:
+            # Display table with link as a clickable column
+            article_cols = ["published_date", "publisher", "sentiment_label",
+                            "net_score", "confidence", "title", "link"]
+            st.dataframe(
+                display_df[article_cols].reset_index(drop=True),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "published_date": st.column_config.DateColumn(
+                        "Date", format="YYYY-MM-DD"),
+                    "publisher": st.column_config.TextColumn(
+                        "Publisher", width="small"),
+                    "sentiment_label": st.column_config.TextColumn(
+                        "Label", width="small",
+                        help="FinBERT's hard classification of the article."),
+                    "net_score": st.column_config.NumberColumn(
+                        "Net score", format="%+.3f",
+                        help="p_positive - p_negative from FinBERT, range [-1, +1]."),
+                    "confidence": st.column_config.NumberColumn(
+                        "Confidence", format="%.3f",
+                        help="Max class probability — how sure was the model."),
+                    "title": st.column_config.TextColumn(
+                        "Title", width="large"),
+                    "link": st.column_config.LinkColumn(
+                        "Link", display_text="Open",
+                        help="Opens original article in a new tab."),
+                },
+                height=min(35 * (len(display_df) + 1) + 5, 600),
+            )
+
+            # Distribution summary at the bottom
+            n_pos = int((display_df["sentiment_label"] == "positive").sum())
+            n_neu = int((display_df["sentiment_label"] == "neutral").sum())
+            n_neg = int((display_df["sentiment_label"] == "negative").sum())
+            mean_score = float(display_df["net_score"].mean())
+            st.caption(
+                f"Of {len(display_df)} displayed: "
+                f":green[{n_pos} positive] · {n_neu} neutral · :red[{n_neg} negative] · "
+                f"mean score **{mean_score:+.3f}**"
+            )
+
+
+st.divider()
+
+
+# ============================================================
+# SECTION 5: SENTIMENT vs ML PREDICTIONS
+# ============================================================
+st.subheader("Sentiment vs ML predictions")
 st.caption(
     "Each dot is a ticker on the snapshot date with both sentiment data AND "
-    "an AI-ML prediction. Quadrants tell different stories: top-right = model "
+    "an ML prediction. Quadrants tell different stories: top-right = model "
     "and news agree (bullish). Top-left = contrarian bull (model sees what "
     "news doesn't). Bottom-right = contrarian bear (model dismisses positive "
     "news). Bottom-left = model and news agree (bearish)."
@@ -801,7 +988,7 @@ preds_today = load_predictions_for_date(snapshot_date)
 
 if preds_today.empty:
     st.info(
-        f"No AI-ML predictions for {snapshot_date}. The daily inference job may "
+        f"No ML predictions for {snapshot_date}. The daily inference job may "
         "not have run yet, or you've selected a weekend/holiday date."
     )
 elif snapshot.empty:
@@ -816,7 +1003,7 @@ else:
 
     if cross.empty:
         st.info(
-            "No tickers overlap between today's sentiment and AI-ML predictions. "
+            "No tickers overlap between today's sentiment and ML predictions. "
             "This is expected if sentiment data has different ticker coverage."
         )
     else:
@@ -902,7 +1089,7 @@ else:
             margin=dict(l=40, r=20, t=20, b=40),
             xaxis=dict(title="Sentiment (avg_net_score)",
                         range=[-x_pad, x_pad], zeroline=False),
-            yaxis=dict(title="AI-ML predicted_value (probability)",
+            yaxis=dict(title="ML predicted_value (probability)",
                         range=[y_min - y_pad, y_max + y_pad], zeroline=False),
             legend=dict(orientation="h", y=1.08, x=1, xanchor="right"),
         )

@@ -31,8 +31,12 @@ with tab_pages:
             "summary": "Platform health and freshness check",
             "details": (
                 "Shows the latest pipeline run status across all daily steps "
-                "(prices, indicators, sector RS, signals, email, Supabase push, earnings calendar). "
-                "Quick way to confirm overnight data has refreshed before using the rest of the app."
+                "(prices, indicators, sector RS, technical/fundamental ranks, signals, "
+                "ML inference, Supabase push, earnings calendar, daily emails). "
+                "Quick way to confirm overnight data has refreshed before using the rest of the app.\n\n"
+                "Three automated emails fire daily after the pipeline completes: a Signal Analytics summary, "
+                "a FinBERT Sentiment Alert (extremes by ticker, with hyperlinks to source articles), "
+                "and a Daily ML Picks email (top 10 / bottom 10 by predicted probability)."
             ),
             "best_for": "Morning sanity check; verifying the pipeline ran cleanly.",
         },
@@ -86,6 +90,47 @@ with tab_pages:
             "best_for": "Once-a-day market snapshot; understanding where leadership and risk are concentrated.",
         },
         {
+            "page": "🤖 ML Performance",
+            "summary": "Meta-learner predictions, accuracy tracking, and diagnostics",
+            "details": (
+                "Tracks the daily output of the production meta-learner: a 4-domain stack "
+                "(technical, fundamental, sentiment, macro) of XGBoost/LightGBM/CatBoost/PyTorch sub-models "
+                "predicting whether each stock will beat the S&P median over the next 10 trading days.\n\n"
+                "**Headline KPIs**: resolved/pending prediction counts, accuracy, mean rank IC, top-decile "
+                "mean return, decile spread.\n\n"
+                "**Decile performance**: bar chart of mean realized 10-day return by predicted decile — "
+                "the 'staircase' is the canonical money chart for a ranking model.\n\n"
+                "**Diagnostics that work today**: probability distribution histogram, top-decile sector "
+                "composition, predictions-per-day pipeline health bar.\n\n"
+                "**Resolved-data charts**: rank IC over time, top-vs-bottom decile cumulative return, "
+                "calibration plot, and confusion matrix. These populate automatically once predictions "
+                "age past their 10-day forward window.\n\n"
+                "Controls: model selector, date range picker, aggregate-vs-per-date view toggle. Defaults "
+                "to the production-flagged model."
+            ),
+            "best_for": "Validating that the model is actually adding signal vs. noise; debugging diagnostics like calibration drift.",
+        },
+        {
+            "page": "📰 Sentiment",
+            "summary": "FinBERT-derived news sentiment, by ticker and sector",
+            "details": (
+                "Daily aggregates from FinBERT scoring of news articles and earnings transcripts.\n\n"
+                "**Today's extremes**: top 10 most-positive and most-negative tickers on the snapshot date, "
+                "with sector and article counts. Click to drill into Ticker Detail.\n\n"
+                "**Sentiment by sector**: article-weighted average sentiment per sector — heavily-covered "
+                "tickers move their sector's number more than lightly-covered ones.\n\n"
+                "**Sustained sentiment leaders & laggards**: multi-day weighted averages, with consistency "
+                "metrics (% days positive / negative) to filter out one-day blips.\n\n"
+                "**Per-ticker time series**: daily score + 5-day rolling average + extreme-day markers, "
+                "with article-count bars underneath. Same thresholds as the daily FinBERT email "
+                "(≥ +0.40 for extreme positive, ≤ -0.25 for extreme negative).\n\n"
+                "**Sentiment vs ML predictions**: scatter showing where the model agrees with the news "
+                "vs where it disagrees. Companion tables flag 'contrarian bulls' (negative sentiment, model "
+                "still bullish) and 'contrarian bears' (positive sentiment, model still bearish)."
+            ),
+            "best_for": "Spotting narrative shifts; cross-checking ML picks against news tone; finding contrarian setups.",
+        },
+        {
             "page": "📖 About & Glossary",
             "summary": "This page",
             "details": "Documentation for pages, every metric, and the platform architecture.",
@@ -108,7 +153,7 @@ with tab_glossary:
     domain_filter = st.radio(
         "Domain",
         options=["Technical", "Fundamental", "AI-ML Performance",
-                 "Sentiment", "Macro (planned)"],
+                 "Sentiment", "Macro"],
         horizontal=True,
         label_visibility="collapsed",
     )
@@ -1001,24 +1046,630 @@ with tab_glossary:
             """)
 
     elif domain_filter.startswith("AI-ML Performance"):
-        st.info("Model prediction tracking, accuracy and diagnostics, "
-                "including decile performance, probability distribution, "
-                "top-decile composition by sector, RankIC over time, calibration plot and confusion matrix.")
+        st.markdown("### AI / ML Performance metrics")
+        st.caption(
+            "Definitions for the ML Performance dashboard. The production model is a "
+            "hierarchical meta-learner: four domain ensembles (technical, fundamental, "
+            "sentiment, macro) feed a meta-ensemble that produces the final prediction."
+        )
+
+        st.markdown("#### The model")
+
+        with st.expander("**Meta-learner — overall architecture**"):
+            st.markdown("""
+            **Definition**: A two-level stacked ensemble. The bottom level has four
+            domain ensembles, each with multiple base learners (XGBoost, LightGBM,
+            CatBoost, PyTorch MLP). The top level is a meta-ensemble that takes the
+            four domain scores plus a small set of regime-context features and
+            produces the final prediction.
+
+            **Bottom level (per domain)**:
+            - Each domain ensemble trains 4 sub-models on that domain's features
+            - Cross-validation finds the optimal weighted combination
+            - Final output: one calibrated probability per ticker per day
+
+            **Top level (meta-ensemble)**:
+            - Input: 4 domain scores + 4 regime-context features (VIX, curve, QQQ/SPY ratio, HYG/IEF ratio)
+            - Models: XGBoost + PyTorch MLP, weighted by OOF rank IC
+            - Output: final probability
+
+            **Why this design**: Each domain captures different signal; the meta-learner
+            adapts the mixing weights to the regime. A 'no fundamental data, high VIX'
+            day will weight domains differently than a 'rich fundamental data, low VIX' day.
+
+            **Related**: Domain ensemble, predicted_value, rank IC.
+            """)
+
+        with st.expander("**Domain ensemble — per-domain stacker**"):
+            st.markdown("""
+            **Definition**: For each of the 4 domains (technical, fundamental, sentiment, macro),
+            an ensemble of 4 sub-models is trained on that domain's features only.
+            Sub-models: XGBoost (GPU), LightGBM (CPU), CatBoost (GPU), PyTorch MLP (GPU).
+
+            **Weight tuning**: 500-sample Dirichlet search optimizing rank IC on out-of-fold
+            predictions. Best combination becomes the domain's score.
+
+            **Auto-pruning**: Domains with >95% null features (e.g., sentiment in the first
+            ~30 days of operation, before sufficient article history accumulates) are dropped
+            automatically. The meta-learner fills their slot with a neutral 0.5 / 0.0.
+
+            **Related**: Meta-learner, OOF rank IC.
+            """)
+
+        st.markdown("#### Targets — what the model is predicting")
+
+        with st.expander("**beat_median_10d — classification target**"):
+            st.markdown("""
+            **Definition**: For each (ticker, date), did this stock's log return over the
+            next 10 trading days beat the **median** of the S&P 500 universe's log returns
+            over the same period?
+
+            **Type**: Binary (1 = beat, 0 = didn't beat).
+
+            **Why median, not SPY**: SPY's return is dominated by mega-caps (top 7 names
+            are ~30% of SPY). The median is a fairer cross-sectional comparison. Also,
+            the label is naturally balanced (~50/50 in any regime), which is good for
+            classifier training. A 'beat SPY' label would be skewed in bull markets where
+            mega-caps lead.
+
+            **What the model outputs**: Probability that beat_median_10d = 1.
+
+            **Resolution**: The target value becomes known ~10 trading days after the
+            prediction was made, once forward prices are in.
+
+            **Related**: log_ret_10d, predicted_value, prediction_correct.
+            """)
+
+        with st.expander("**log_ret_10d — regression target**"):
+            st.markdown("""
+            **Definition**: `log(close_at_D+10 / close_at_D)` — the 10-trading-day forward
+            log return.
+
+            **Why log return**: Symmetric (a 100% gain and a 50% loss have equal magnitude,
+            since they undo each other). Additive over time. Better behaved under outliers
+            than simple percent change.
+
+            **Range**: Roughly -0.30 to +0.30 in normal markets; can be much more extreme.
+
+            **Used for**: Regression-target models (when present) and decile-spread / decile-
+            staircase calculations on the ML Performance page (we use the actual log_ret_10d
+            from ml_targets, not the predicted one).
+
+            **Related**: beat_median_10d, decile spread, top-decile mean return.
+            """)
+
+        st.markdown("#### Predictions")
+
+        with st.expander("**predicted_value**"):
+            st.markdown("""
+            **Definition**: The model's output. For a classification model, this is the
+            probability of beat_median_10d = 1, in [0, 1]. For a regression model, this
+            is the predicted log_ret_10d.
+
+            **Range (classification)**: ~0.20 to ~0.55 in practice — the meta-learner
+            currently runs slightly bearish on absolute calibration but ranks correctly.
+
+            **Interpretation**: For *ranking* purposes (which is what matters for the
+            dashboard's decile chart), relative ordering matters, not absolute value.
+            A model whose top-decile mean is 0.45 and bottom-decile mean is 0.30 still
+            has rank signal even though no ticker is above 0.50.
+
+            **Related**: predicted_class, decile, probability.
+            """)
+
+        with st.expander("**predicted_class**"):
+            st.markdown("""
+            **Definition**: The hard 0/1 label derived from `predicted_value`.
+            Default decision threshold is 0.50 (predicted_value > 0.50 → class 1).
+
+            **Use**: Confusion matrix, accuracy, precision, recall calculations.
+
+            **Caution**: Because the model currently outputs probabilities skewed below
+            0.50, predicted_class will often be 0 for all rows. The decile-based view
+            (top decile vs bottom decile) is more informative than the 0.50 threshold.
+
+            **Related**: predicted_value, accuracy, confusion matrix.
+            """)
+
+        with st.expander("**rank_overall**"):
+            st.markdown("""
+            **Definition**: Within a single (model_id, prediction_date), rank of each
+            ticker by predicted_value, with 1 = highest predicted_value.
+
+            **Range**: 1 to N (where N is the number of predictions that day, typically ~503).
+
+            **Pre-computed**: Calculated at sync time in push_to_supabase.py and stored
+            in the Supabase mirror, so the dashboard doesn't recompute on every render.
+
+            **Related**: decile, top_decile_flag.
+            """)
+
+        with st.expander("**decile** and **top_decile_flag**"):
+            st.markdown("""
+            **Definition**: Within a single (model_id, prediction_date), the decile of
+            each ticker by predicted_value. **1 = lowest** predicted_value (most bearish),
+            **10 = highest** predicted_value (most bullish).
+
+            **top_decile_flag**: Boolean shortcut, true iff decile = 10.
+
+            **Why deciles matter**: With a universe of ~500 names, each decile is ~50
+            tickers — large enough that the mean return of the decile is statistically
+            informative. The decile staircase (mean realized return by decile) is the
+            cleanest visualization of whether the model has ranking signal.
+
+            **Related**: rank_overall, decile spread, top-decile mean return.
+            """)
+
+        st.markdown("#### Performance metrics")
+
+        with st.expander("**Rank IC (Spearman rank correlation)**"):
+            st.markdown("""
+            **Definition**: Spearman rank correlation between predicted_value and actual
+            10-day return, computed over resolved predictions. Equivalent to Pearson
+            correlation on the ranks of the two variables.
+
+            **Formula** (conceptually):
+            `rank_IC = corr(rank(predicted_value), rank(actual_log_ret_10d))`
+
+            **Range**: -1 to +1.
+            - +1 = model ranks tickers perfectly (top predicted = highest return)
+            - 0 = no relationship (noise)
+            - -1 = inverted (top predicted = lowest return)
+
+            **Industry context**: In quantitative equity, daily rank IC of +0.02 to +0.05
+            is considered respectable for a single-factor signal; +0.05 to +0.10 is good;
+            > +0.10 is excellent. Multi-factor ensembles can push higher. **Our model is
+            in early training and will need months of out-of-sample data to evaluate properly.**
+
+            **Why Spearman, not Pearson**: Spearman is robust to outliers in returns
+            (which are heavy-tailed). The ranks compress the tails.
+
+            **Related**: Decile spread, top-decile mean return.
+            """)
+
+        with st.expander("**Top-decile mean return / Decile spread**"):
+            st.markdown("""
+            **Top-decile mean return**: Mean of actual `log_ret_10d` for resolved
+            predictions where `decile = 10`. Answers: "If I'd held an equal-weight
+            basket of the model's top 10% picks each day, what would my average
+            10-day return have been?"
+
+            **Decile spread**: Top-decile mean return minus bottom-decile (decile = 1)
+            mean return. Answers: "What's the economic value of the model's full
+            ranking, top to bottom?"
+
+            **Interpretation**: A positive top-decile mean isn't enough on its own —
+            you want the spread to be positive too. A model that ranks the entire
+            universe correctly will have a clearly positive spread (top decile up,
+            bottom decile down).
+
+            **Related**: Decile staircase, rank IC.
+            """)
+
+        with st.expander("**Accuracy, precision, recall, F1 (classification)**"):
+            st.markdown("""
+            **Accuracy**: Share of resolved predictions where predicted_class matched
+            actual beat_median_10d. With a 50/50 base rate, random guessing gives 50%
+            accuracy.
+
+            **Precision (positive class)**: Of the predictions where predicted_class = 1,
+            what share actually beat the median? Useful when you only act on bullish
+            signals.
+
+            **Recall (positive class)**: Of the actual beat-median outcomes, what share
+            did the model predict as class 1? Useful for understanding how many winners
+            the model misses.
+
+            **F1**: Harmonic mean of precision and recall. Balances the two.
+
+            **Caveat**: All four depend on the 0.50 decision threshold. Because the
+            current model runs probabilistically bearish, the confusion matrix can look
+            poor while the rank-based metrics (rank IC, decile spread) look fine.
+
+            **Related**: Confusion matrix, calibration.
+            """)
+
+        with st.expander("**Calibration plot**"):
+            st.markdown("""
+            **Definition**: Bucket predictions by predicted_value (0.0-0.1, 0.1-0.2, …),
+            then plot the **mean predicted_value** vs the **mean actual hit rate**
+            (share of resolved predictions in that bucket that beat the median) for
+            each bucket.
+
+            **Perfect calibration**: All buckets sit on the diagonal — a 0.30 bucket
+            has 30% hit rate, a 0.50 bucket has 50%, etc.
+
+            **Above the diagonal**: Model is **under-confident** in that bucket. Buckets
+            it predicts at 0.30 actually win 45% of the time. We could raise predicted
+            probabilities and improve calibration without changing rank order.
+
+            **Below the diagonal**: Model is **over-confident**. Predicted 0.70 but only
+            wins 55% of the time.
+
+            **Why it matters**: For position sizing or ensembling with other models,
+            you want calibrated probabilities. For pure ranking (deciles, picks), only
+            rank order matters and calibration is cosmetic.
+
+            **Related**: Probability distribution histogram, isotonic regression (planned
+            fix when calibration drift is detected).
+            """)
+
+        with st.expander("**Confusion matrix**"):
+            st.markdown("""
+            **Definition**: 2x2 grid of resolved predictions, organized as:
+
+            ```
+                              Actual = 0     Actual = 1
+            Predicted = 0   |     TN      |      FN     |
+            Predicted = 1   |     FP      |      TP     |
+            ```
+
+            - **TN** (true negative): correctly predicted below median
+            - **TP** (true positive): correctly predicted above median
+            - **FP** (false positive): wrongly predicted above median (model was too bullish)
+            - **FN** (false negative): wrongly predicted below median (model missed a winner)
+
+            **Use**: Visual sanity check for class imbalance and which type of error
+            dominates. The companion metrics (accuracy, precision, recall, F1) summarize
+            it numerically.
+
+            **Related**: Accuracy, precision, recall, calibration.
+            """)
+
+        with st.expander("**Rank IC over time / 5-day rolling**"):
+            st.markdown("""
+            **Definition**: Daily rank IC plotted over prediction_date, with a 5-day
+            rolling average for trend.
+
+            **What to look for**:
+            - Sustained positive level → model has steady signal
+            - Rising trend → model improving (e.g., with more training data)
+            - Decay over time → model is overfitting to the past, regime has shifted, or
+              data quality has degraded
+            - Negative spikes → bad days; not necessarily concerning if rolling avg holds
+
+            **Caveat**: Don't read too much into the first 30 resolved days. The variance
+            of daily rank IC is large; you need ~30+ days to see a stable signal.
+            """)
+
+        with st.expander("**Top vs bottom decile cumulative return**"):
+            st.markdown("""
+            **Definition**: Two cumulative-return lines, one for the top decile (long)
+            and one for the bottom decile (short). The spread between them is the model's
+            economic value over time.
+
+            **Methodology**: Each day, take the mean realized log_ret_10d of resolved
+            predictions in decile 10 (long line) and decile 1 (short line). Cumulate
+            each over the date range.
+
+            **Note on overlap**: The 10-day forward windows overlap across daily
+            predictions. This isn't a tradeable backtest — it's a visualization of the
+            model's signal persistence. A proper backtest would model holding periods
+            explicitly.
+
+            **Related**: Decile spread, rank IC.
+            """)
+
+        st.markdown("#### Pipeline & infrastructure")
+
+        with st.expander("**is_production flag**"):
+            st.markdown("""
+            **Definition**: A boolean on ml_models indicating which model the daily
+            inference job uses to write predictions, and which model the ML Picks email
+            describes.
+
+            **Convention**: At most one row per (component, target_name) is marked
+            is_production = true. The register_model.py script enforces this by demoting
+            existing production rows when a new one is marked production.
+
+            **Use**: When a new model is trained and registered, it can sit in archive
+            until validated. Flipping is_production = true makes it the live model
+            without code changes.
+
+            **Related**: register_model.py, run_daily_inference.py.
+            """)
+
+        with st.expander("**v_ml_prediction_outcomes / v_ml_model_performance** (SQL Server views)"):
+            st.markdown("""
+            **Definition**: Two live views in SQL Server that join ml_predictions to
+            ml_targets and aggregate by (model_id, prediction_date).
+
+            - **v_ml_prediction_outcomes**: one row per prediction, with the actual
+              outcome joined in (NULL for unresolved predictions)
+            - **v_ml_model_performance**: per-(model, date) aggregates — count,
+              accuracy, top/bottom decile returns, decile spread, rank IC
+
+            **Not yet in Supabase**: These views run only in SQL Server. The dashboard
+            recomputes the equivalent aggregations in pandas from the synced
+            ml_predictions + ml_targets tables. If query performance becomes an issue,
+            we may add a push function for v_ml_model_performance.
+
+            **Related**: ml_targets, ml_predictions.
+            """)
 
     elif domain_filter.startswith("Sentiment"):
-        st.info("Metrics include today's extreme-tailed FinBERT-derived sentiment scores "
-                "on news headlines and earnings call transcripts, ticker-level sentiment aggregates, "
-                "news velocity, and event flags (M&A, downgrades/upgrades, guidance changes, 8-K events).")
+        st.markdown("### Sentiment metrics")
+        st.caption(
+            "Definitions for the Sentiment dashboard page. Sentiment is computed daily "
+            "by FinBERT (a transformer fine-tuned on financial text) scoring news articles "
+            "and earnings transcripts, then aggregated per (ticker, date)."
+        )
+
+        st.markdown("#### Methodology")
+
+        with st.expander("**FinBERT — the underlying model**"):
+            st.markdown("""
+            **Model**: ProsusAI/finbert from HuggingFace — a BERT-based transformer
+            fine-tuned on financial news for sentiment classification.
+
+            **Inference**: Each article (title + summary) is passed through FinBERT,
+            which outputs probabilities for three classes: positive, negative, neutral.
+
+            **Runtime**: GPU-accelerated on a local RTX 3060. Daily news for ~500
+            tickers scores in a few minutes.
+
+            **Limitation**: Trained on financial news pre-2020; doesn't see live macro
+            context. Sometimes labels strongly negative news as 'neutral' if the
+            sentiment is implicit rather than overt.
+            """)
+
+        with st.expander("**Net score per article**"):
+            st.markdown("""
+            **Definition**: For each article, `net = p_positive - p_negative`, ignoring
+            the neutral probability.
+
+            **Range**: -1 (purely negative) to +1 (purely positive). Centered at 0 for
+            neutral coverage.
+
+            **Why net, not just positive**: A negative article and a positive article
+            both have some 'positive' probability mass; the difference is what matters.
+            """)
+
+        st.markdown("#### Daily aggregates per ticker")
+
+        with st.expander("**avg_net_score**"):
+            st.markdown("""
+            **Definition**: Article-confidence-weighted average of net scores across all
+            articles for a given (ticker, sentiment_date).
+
+            **Formula**:
+            `avg_net_score = sum(net_i * confidence_i) / sum(confidence_i)`
+
+            **Range**: Roughly -1 to +1; in practice usually -0.5 to +0.5.
+
+            **Why confidence-weighted**: Articles where FinBERT is more confident (one
+            class clearly dominates) count more than ambiguous articles.
+
+            **Used as**: The headline number on the Sentiment dashboard. Also a feature
+            for the ML model (`sent_avg_net_score` in the feature store).
+
+            **Related**: avg_confidence, pct_positive, pct_negative.
+            """)
+
+        with st.expander("**avg_confidence**"):
+            st.markdown("""
+            **Definition**: Mean across articles of `max(p_positive, p_negative, p_neutral)` —
+            essentially "how confident was FinBERT, on average".
+
+            **Range**: ~0.33 (random) to 1.0 (perfectly confident).
+
+            **Use**: Differentiating high-conviction news days from ambiguous ones.
+            High avg_net_score with low avg_confidence is less actionable than the
+            same score with high confidence.
+
+            **Related**: avg_net_score.
+            """)
+
+        with st.expander("**pct_positive / pct_negative**"):
+            st.markdown("""
+            **Definition**: Share of articles in the day's bucket whose top class was
+            positive (or negative).
+
+            **Stored as decimal** (0.65 = 65%); rendered as percent in the dashboard
+            (multiply by 100 right before display, per the project convention).
+
+            **Use**: A ticker with avg_net_score = +0.20 from 100% positive articles is
+            different from one with the same score from 70% positive, 30% negative —
+            the second has more contested coverage.
+
+            **Related**: avg_net_score, n_articles.
+            """)
+
+        with st.expander("**n_articles / n_publishers**"):
+            st.markdown("""
+            **n_articles**: Count of distinct articles mentioning the ticker on that
+            sentiment_date.
+
+            **n_publishers**: Count of distinct publishers (Bloomberg, Reuters, WSJ, etc.).
+
+            **Use**:
+            - n_articles is a coverage / newsworthiness proxy. The 'min articles' slider
+              on the Sentiment page filters out tickers with thin coverage.
+            - n_publishers helps distinguish a real news event (multiple outlets) from
+              a single-publisher take.
+
+            **Related**: avg_net_score, sustained sentiment leaders.
+            """)
+
+        st.markdown("#### Derived views")
+
+        with st.expander("**Article-weighted sector sentiment**"):
+            st.markdown("""
+            **Definition**: For each sector on a given date,
+
+            `sector_score = sum(ticker_avg_score * ticker_n_articles) / sum(ticker_n_articles)`
+
+            **Why weighted**: Heavily-covered tickers (e.g., AAPL with 50 articles)
+            move the sector average more than thinly-covered ones (a small-cap with 2
+            articles). Matches what's actually driving sector-level news flow.
+
+            **Used in**: Sentiment dashboard, sector heatmap.
+            """)
+
+        with st.expander("**Sustained leaders / laggards / consistency**"):
+            st.markdown("""
+            **Definition**: Over a multi-day window (default 14 days), per ticker:
+
+            - **Weighted average score**: article-weighted across all days
+            - **% days positive**: share of days in the window where avg_net_score > 0
+            - **% days negative**: share where avg_net_score < 0
+
+            **Why two metrics**: Weighted average favors strong-tone tickers (one big
+            positive day can pull it up). Consistency favors tickers that are positive
+            most days, even if mildly. Either lens is useful; the dashboard lets you
+            sort by whichever.
+
+            **Min days qualifier**: Tickers must have at least N days of coverage in
+            the window (default 5) to be ranked, to filter out one-or-two-day stories.
+
+            **Related**: avg_net_score, n_articles.
+            """)
+
+        with st.expander("**Extreme-day thresholds**"):
+            st.markdown("""
+            **Positive extreme**: `avg_net_score >= +0.40`.
+
+            **Negative extreme**: `avg_net_score <= -0.25`.
+
+            **Why asymmetric**: Distribution of avg_net_score is naturally
+            slightly-positive-biased (most financial news is neutrally factual or mildly
+            bullish; truly negative news is rarer but more meaningful). Using the same
+            thresholds on both sides would over-flag positive and under-flag negative.
+
+            **Used in**: Daily FinBERT email (extreme-by-sector alerts), per-ticker time
+            series markers on the Sentiment page.
+            """)
+
+        st.markdown("#### Cross-domain")
+
+        with st.expander("**Contrarian bulls / Contrarian bears**"):
+            st.markdown("""
+            **Definition**: Tickers where ML prediction and sentiment disagree.
+
+            - **Contrarian bull**: avg_net_score < 0 (negative news) but ML decile >= 8
+              (model still ranks the ticker bullish)
+            - **Contrarian bear**: avg_net_score > 0 (positive news) but ML decile <= 3
+              (model still ranks the ticker bearish)
+
+            **Why interesting**: These are setups where the model is leaning against
+            the news narrative. Sometimes that's signal (the model sees something the
+            news doesn't), sometimes it's noise — but the disagreement is worth
+            investigating.
+
+            **Used in**: Sentiment vs ML predictions scatter on the Sentiment page.
+            Companion tables list the top 5 of each.
+
+            **Related**: predicted_value, decile, avg_net_score.
+            """)
 
     elif domain_filter.startswith("Macro"):
-        st.info("**Planned future component.** Macroeconomic context features for the ensemble meta-learner:")
-        st.markdown("""
-        - **Rates & Curve**: 2y/10y Treasury yields, 2s10s spread, real rates
-        - **Risk & Volatility**: VIX, VVIX, high-yield spreads, MOVE index
-        - **Currency & Commodities**: DXY (dollar index), gold, crude oil, copper
-        - **Economic Indicators**: ISM PMI, unemployment claims, inflation expectations
-        - **Regime Classification**: Risk-on vs risk-off, growth vs value rotation (including Hidden Markov Model results)
-        """)
+        st.markdown("### Macro metrics")
+        st.caption(
+            "Macroeconomic features collected daily, used as inputs to the meta-learner's "
+            "regime-context layer. Currently built and stored in feature store, with a 10-year "
+            "history; not yet surfaced in a dedicated dashboard page (planned)."
+        )
+
+        st.markdown("#### Rates & curve")
+
+        with st.expander("**macro_us_10y_yield / macro_us_13w_yield**"):
+            st.markdown("""
+            **Definition**: Daily yield on the 10-year US Treasury and the 13-week
+            (3-month) US T-Bill, sourced via the yfinance feed (^TNX and ^IRX).
+
+            **Range**: Percent (e.g., 4.25 = 4.25% annualized).
+
+            **Use**: Base inputs to the curve spread; standalone signals for rate-sensitive
+            sectors (REITs, utilities, financials).
+
+            **Related**: macro_curve_10y_minus_13w.
+            """)
+
+        with st.expander("**macro_curve_10y_minus_13w**"):
+            st.markdown("""
+            **Definition**: 10-year yield minus 13-week yield. The 'yield curve slope'.
+
+            **Range**: Usually -1% to +3%. Negative values mean an inverted curve.
+
+            **Why it matters**: Yield-curve inversion has preceded most US recessions
+            historically. Used as a regime-context feature for the meta-learner —
+            the model can downweight bullish technicals when the curve is deeply
+            inverted.
+
+            **Used in**: Meta-learner regime features.
+            """)
+
+        st.markdown("#### Risk & volatility")
+
+        with st.expander("**macro_vix**"):
+            st.markdown("""
+            **Definition**: CBOE Volatility Index (^VIX) — implied volatility of S&P 500
+            options over the next 30 days, annualized.
+
+            **Range**: Roughly 9 (extreme complacency) to 80+ (panic).
+
+            **Interpretation**:
+            - < 15 = low fear, often coincides with grinding uptrends
+            - 15-25 = normal market
+            - 25-35 = elevated stress
+            - 35+ = crisis-level fear
+
+            **Used in**: Meta-learner regime features. The model uses VIX to adjust how
+            much it trusts technical signals (which tend to misfire in high-VIX regimes
+            where correlations spike).
+            """)
+
+        with st.expander("**macro_hyg_ief_ratio**"):
+            st.markdown("""
+            **Definition**: Close-of-day ratio HYG (high-yield corporate bond ETF) /
+            IEF (7-10y Treasury ETF). A risk-appetite gauge.
+
+            **Interpretation**: Rising HYG/IEF = credit investors taking more risk
+            (bullish risk-on). Falling = credit risk-off, often precedes equity stress.
+
+            **Used in**: Meta-learner regime features.
+            """)
+
+        st.markdown("#### Currencies & commodities")
+
+        with st.expander("**macro_dollar_index**"):
+            st.markdown("""
+            **Definition**: DXY-equivalent — value of the US dollar against a basket of
+            major currencies. Sourced as UUP (the ETF) close.
+
+            **Use**: Strong dollar (rising DXY) is usually a headwind for multinationals
+            and commodities. Used as a regime-context input.
+            """)
+
+        with st.expander("**macro_gold_close / macro_oil_close**"):
+            st.markdown("""
+            **macro_gold_close**: Close price of GLD (SPDR Gold Shares ETF).
+            **macro_oil_close**: Close price of USO (United States Oil Fund).
+
+            **Use**: Inputs for commodity-sensitive sectors (energy, materials, miners),
+            inflation regime detection.
+            """)
+
+        st.markdown("#### Sector ratios")
+
+        with st.expander("**macro_qqq_spy_ratio / macro_iwm_spy_ratio**"):
+            st.markdown("""
+            **qqq_spy_ratio**: QQQ close / SPY close — tech vs broad market.
+            Rising = tech leadership; falling = tech lagging.
+
+            **iwm_spy_ratio**: IWM close / SPY close — small-caps vs broad market.
+            Rising = risk-on, small-cap leadership; falling = flight to large-caps.
+
+            **Use**: Regime-context features for the meta-learner. These rotations
+            often precede broader regime shifts.
+            """)
+
+        st.info(
+            "**Planned**: A dedicated Macro dashboard page with rate / curve / volatility / "
+            "ratio time series, and a regime-detection panel using a Hidden Markov Model "
+            "over these features. Currently the data is available in feature store and used "
+            "as inputs to the meta-learner, but not yet visualized."
+        )
 
 # ============================================================
 # TAB 3: ARCHITECTURE
